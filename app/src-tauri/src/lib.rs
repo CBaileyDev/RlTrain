@@ -1,3 +1,4 @@
+mod assistant;
 mod engine;
 mod error;
 pub use error::{AppError, AppResult};
@@ -15,7 +16,8 @@ pub fn run() {
             engine::list_runs,
             engine::run_metrics,
             engine::save_api_key,
-            engine::ask_assistant
+            assistant::ask_assistant,
+            assistant::assistant_settings
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

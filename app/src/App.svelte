@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Chart from './lib/Chart.svelte';
+  import { relativeSkill } from './lib/metrics';
   import MatchView from './lib/MatchView.svelte';
   import Document from './lib/Document.svelte';
   import schemaData from '../../configs/schema/run.schema.json';
@@ -17,8 +18,9 @@
     import: 'default',
     eager: true,
   }) as Record<string, string>;
-  const pages = ['Overview', 'Train', 'Rewards', 'Match', 'Runs', 'Assistant', 'Learn', 'Settings'];
+  const pages = ['Overview', 'Train', 'Rewards', 'Match', 'Runs', 'Assistant', 'Learn', 'Settings', 'Graphs'];
   const pageDescriptions: Record<string, string> = {
+    Graphs: 'Follow learning, diagnose instability, and compare experiments.',
     Overview: 'A clear view of what your agent is learning.',
     Train: 'Shape an experiment. Let the policy find its own way.',
     Rewards: 'Tell your agent what matters, one behavior at a time.',
@@ -83,10 +85,41 @@
   let theme = $state(localStorage.getItem('rlstudio-theme') ?? 'forest');
   let onboarding = $state(localStorage.getItem('rlstudio-onboarded') !== 'yes');
   let log = $state<string[]>([]);
-  let question = $state('What do these metrics suggest I should try next?');
+  let question = $state('');
+  let assistantSettings = $state<{provider:string; baseUrl:string; defaultModel:string; models:string[]; keyConfigured:boolean; message?:string; catalogAvailable?:boolean} | null>(null);
+  let autoApply = $state(true);
+  let autoTune = $state(false);
+  let tuneEvery = $state(25);
+  let lastTuneIteration = 0;
+  let lastTuneAt = 0;
+  let tuneHistory = $state<{time:string; explanation:string; changes:Config; applied:boolean}[]>([]);
+  let proposalApplied = $state(false);
+  let applying = $state(false);
+  let proposalContext: {generation:number; editable:string; running:string; active:boolean} | null = null;
+  function contextStamp() { return {generation:requestGeneration, editable:JSON.stringify(config), running:JSON.stringify(runConfig), active}; }
+  function contextMatches(stamp: ReturnType<typeof contextStamp>) {
+    const now = contextStamp();
+    return stamp.generation === now.generation && stamp.editable === now.editable && stamp.running === now.running && stamp.active === now.active;
+  }
+  let proposalBefore = $state<Config>({});
+  let requestGeneration = 0;
+  let initialSteps = $state(0);
+  let initialIteration = $state(0);
+  let startedSteps = $state(0);
+  let startedIteration = $state(0);
+  let smoothing = $state(0.8);
+  let graphWindow = $state(0);
+  let graphGroup = $state('Learning');
+  let evalResult = $state<{blueWins:number;orangeWins:number;draws:number;blue:string;orange:string} | null>(null);
+  const skill = $derived(evalResult ? relativeSkill(evalResult.blueWins, evalResult.orangeWins, evalResult.draws) : null);
+  const graphRows = $derived(graphWindow ? rows.slice(-graphWindow) : rows);
+  const graphFields: Record<string, {field:keyof Metric; title:string; description:string}[]> = {
+    Learning: [{field:'reward',title:'Reward per decision',description:'Optimizing the reward recipe, not ranked skill'},{field:'entropy',title:'Policy entropy',description:'Action diversity · maximum ln(90) ≈ 4.50'},{field:'valueLoss',title:'Value loss',description:'Error in the return prediction'},{field:'explainedVariance',title:'Explained variance',description:'Value prediction fit · higher is better'}],
+    Stability: [{field:'kl',title:'Approximate KL divergence',description:'Policy movement between PPO updates'},{field:'clipFraction',title:'Clip fraction',description:'Fraction of samples clipped by PPO'},{field:'policyLoss',title:'Policy loss',description:'Clipped policy objective'},{field:'valueLoss',title:'Value loss',description:'Value objective'}],
+    Performance: [{field:'stepsPerSecond',title:'Training throughput',description:'Agent steps per second'},{field:'touches',title:'Ball touches',description:'Count in this update · batch size matters'},{field:'goals',title:'Goals',description:'Count in this update · both teams'},{field:'episodes',title:'Completed episodes',description:'Count in this update'}],
+  };
   let proposal = $state<Proposal | null>(null);
   let asking = $state(false);
-  let apiKey = $state('');
   let model = $state(localStorage.getItem('rlstudio-model') ?? '');
   let docKey = $state('../../docs/concepts/what-is-rl.md');
   let docSearch = $state('');
@@ -107,6 +140,9 @@
       })),
     ),
   );
+  const totalSteps = $derived(latest?.steps ?? startedSteps);
+  const totalIteration = $derived(latest?.iteration ?? startedIteration);
+  const selectedCheckpoint = $derived(checkpoints.find(cp => cp.path === checkpoint));
   const filteredDocs = $derived(
     Object.keys(documents).filter(
       (k) =>
@@ -199,9 +235,17 @@
       if (problem) throw new Error(problem);
       busy = true;
       try {
+        requestGeneration++;
+        lastTuneIteration = 0;
         rows = [];
+        initialSteps = resume ? selectedCheckpoint?.metadata.steps ?? 0 : 0;
+        initialIteration = resume ? selectedCheckpoint?.metadata.iteration ?? 0 : 0;
+        startedSteps = initialSteps;
+        startedIteration = initialIteration;
+        runConfig = null;
         frame = null;
         evaluation = '';
+        evalResult = null;
         benchmark = '';
         runPath = '';
         status = 'starting';
@@ -249,6 +293,11 @@
       rows = await invoke<Metric[]>('run_metrics', { path: run.path });
       runPath = run.path;
       runConfig = run.config;
+      startedSteps = rows.at(-1)?.steps ?? run.summary.steps ?? 0;
+      startedIteration = rows.at(-1)?.iteration ?? 0;
+      initialSteps = 0;
+      initialIteration = 0;
+      requestGeneration++;
       page = 'Overview';
     });
   }
@@ -330,20 +379,57 @@
       },
     };
   }
-  async function ask() {
+  async function ask(scheduled = false) {
+    if (asking) return;
+    if (applying) return;
     asking = true;
     proposal = null;
+    proposalApplied = false;
+    const stamp = contextStamp();
+    const context = $state.snapshot(active && runConfig ? runConfig : config);
+    proposalBefore = $state.snapshot(config);
+    lastTuneAt = Date.now();
+    lastTuneIteration = totalIteration;
     await safely(async () => {
-      proposal = await invoke<Proposal>('ask_assistant', {
-        question,
-        config: $state.snapshot(config),
-        metrics: $state.snapshot(rows.slice(-30)),
-        model,
+      const result = await invoke<Proposal>('ask_assistant', {
+        question, config: context, metrics: $state.snapshot(rows.slice(-30)), model,
       });
+      if (!contextMatches(stamp)) {
+        notice = 'AI response discarded because the experiment or settings changed. Tune again using the current values.';
+        return;
+      }
+      for (const [key, value] of Object.entries(result.changes)) {
+        if (!schema[key] || typeof value !== 'number' || !Number.isFinite(value))
+          throw new Error('The assistant returned an unsupported setting. Nothing was applied.');
+      }
+      const problem = validate({ ...config, ...result.changes });
+      if (problem) throw new Error(problem);
+      proposal = result;
+      proposalContext = stamp;
+      if (autoApply && (!scheduled || autoTune)) await applyProposal();
+      tuneHistory = [{time:new Date().toLocaleTimeString(),explanation:result.explanation,changes:result.changes,applied:proposalApplied}, ...tuneHistory].slice(0,20);
     });
+    if (scheduled && error) {
+      autoTune = false;
+      notice = 'Scheduled tuning paused after an error. Resolve it before enabling again.';
+    }
     asking = false;
   }
+  $effect(() => {
+    const iteration = latest?.iteration;
+    if (autoTune && status === 'running' && iteration !== undefined && rows.length >= 10 &&
+        iteration - Math.max(lastTuneIteration, initialIteration) >= tuneEvery && !asking &&
+        Date.now() - lastTuneAt >= 60_000 && assistantSettings?.keyConfigured) void ask(true);
+  });
+  async function loadAssistantSettings() {
+    assistantSettings = await invoke('assistant_settings');
+    if (assistantSettings && (!model || !assistantSettings.models.includes(model))) model = assistantSettings.defaultModel;
+  }
   function localReview() {
+    if (asking || applying) return;
+    proposalApplied = false;
+    proposalBefore = $state.snapshot(config);
+    proposalContext = contextStamp();
     if (!latest) {
       proposal = {
         explanation:
@@ -379,12 +465,30 @@
     proposal = { explanation: findings.join('\n\n'), changes };
   }
   async function applyProposal() {
-    if (!proposal) return;
-    const proposed = proposal;
-    config = { ...config, ...proposed.changes };
-    if (active && Object.keys(proposed.changes).every((k) => rewardKeys.includes(k)))
-      await applyRewards();
-    else notice = 'Proposal copied into the next-run configuration. Review it in Train.';
+    if (!proposal || proposalApplied || applying) return;
+    if (!proposalContext || !contextMatches(proposalContext))
+      throw new Error('Settings or experiment changed since this proposal. Run a fresh analysis.');
+    const changes = {...proposal.changes};
+    const problem = validate({ ...config, ...changes });
+    if (problem) throw new Error(problem);
+    applying = true;
+    try {
+      const rewards = Object.fromEntries(Object.entries(changes).filter(([key]) => rewardKeys.includes(key)));
+      if (active && Object.keys(rewards).length) {
+        await invoke('engine_control', {command:{type:'rewards',values:rewards}});
+      }
+      // Preserve unrelated edits that were made while the native command was in flight.
+      const applicable = Object.fromEntries(Object.entries(changes).filter(([key]) => config[key] === proposalBefore[key] || rewardKeys.includes(key)));
+      const candidate = {...config,...applicable};
+      const currentProblem = validate(candidate);
+      if (currentProblem) throw new Error(currentProblem);
+      config = candidate;
+      proposalApplied = true;
+      const staged = Object.keys(applicable).filter(key => !rewardKeys.includes(key)).length;
+      notice = active
+        ? `AI tuning applied: ${Object.keys(rewards).length} reward changes sent to the trainer; ${staged} learning settings prepared for the next session.`
+        : 'AI tuned the configuration and rewards for your next training session.';
+    } finally { applying = false; }
   }
   onMount(() => {
     try {
@@ -410,6 +514,11 @@
             runPath = String(data.run);
             device = String(data.device);
             runConfig = data.config as Config;
+            initialSteps = Number(data.initialSteps ?? data.steps ?? initialSteps);
+            initialIteration = Number(data.initialIteration ?? data.iteration ?? initialIteration);
+            startedSteps = Number(data.steps ?? initialSteps);
+            startedIteration = Number(data.iteration ?? initialIteration);
+            lastTuneIteration = initialIteration;
             break;
           case 'metrics':
             rows = [...rows.slice(-1999), data as unknown as Metric];
@@ -431,6 +540,7 @@
             void safely(refreshRuns);
             break;
           case 'evaluation':
+            evalResult = {blueWins:Number(data.blueWins),orangeWins:Number(data.orangeWins),draws:Number(data.draws),blue:checkpoint,orange:opponent};
             evaluation = `${data.matches} matches · Blue ${data.blueWins} wins · Orange ${data.orangeWins} wins · ${data.draws} draws`;
             break;
           case 'benchmark':
@@ -461,6 +571,7 @@
       const env = await invoke<{ engineAvailable: boolean }>('environment');
       available = env.engineAvailable;
       await refreshRuns();
+      await loadAssistantSettings();
     });
     return () => {
       disposed = true;
@@ -536,7 +647,7 @@
 
     {#if page === 'Overview'}
       <div class="metric-strip">
-        {#each [['Agent steps', number(latest?.steps), 'Experience collected'], ['Mean reward', number(latest?.reward, 4), 'Per agent decision'], ['Throughput', number(latest?.stepsPerSecond), 'Agent steps / second'], ['Policy entropy', number(latest?.entropy, 3), 'Action diversity · max 4.50']] as metric}<div
+        {#each [['Agent steps', number(totalSteps), initialSteps ? 'Lifetime · includes resumed checkpoint' : 'Experience collected'], ['Mean reward', number(latest?.reward, 4), 'Per agent decision'], ['Throughput', number(latest?.stepsPerSecond), 'Agent steps / second'], ['Policy entropy', number(latest?.entropy, 3), 'Action diversity · max 4.50']] as metric}<div
           >
             <span>{metric[0]}</span><strong>{metric[1]}</strong><small>{metric[2]}</small>
           </div>{/each}
@@ -562,7 +673,7 @@
             </div>
             <div>
               <dt>Iteration</dt>
-              <dd>{latest?.iteration ?? '—'}</dd>
+              <dd>{number(totalIteration)}</dd>
             </div>
             <div>
               <dt>Ball touches</dt>
@@ -604,6 +715,24 @@
           />
         </div>{/if}
     {:else if page === 'Train'}
+      <div class="metric-strip">
+        <div><span>Total agent steps</span><strong>{number(totalSteps)}</strong><small>Includes restored checkpoint experience</small></div>
+        <div><span>This session</span><strong>{number(Math.max(0,totalSteps - initialSteps))}</strong><small>New agent steps collected</small></div>
+        <div><span>Restored steps</span><strong>{number(initialSteps)}</strong><small>Checkpoint starting point</small></div>
+        <div><span>PPO updates</span><strong>{number(totalIteration)}</strong><small>{number(Math.max(0,totalIteration-initialIteration))} in this session</small></div>
+      </div>
+      <section class="resume-panel">
+        <div><h2>Continue training</h2><p class="help-note">Resume weights and optimizer state. The step target below adds experience to the saved total.</p></div>
+        <label class="field"><span>Starting checkpoint</span><select bind:value={checkpoint} disabled={active}>
+          <option value="">Select a checkpoint</option>{#each checkpoints as cp}<option value={cp.path}>{cp.name} · {number(cp.metadata.steps)} steps</option>{/each}
+        </select></label>
+        <button disabled={active || !checkpoint || !available} class="primary" onclick={() => {
+          const source = runs.find(run=>run.checkpoints.some(cp=>cp.path===checkpoint));
+          if (source) { config = {...config, hiddenSize:source.config.hiddenSize ?? defaults.hiddenSize!, observation:source.config.observation ?? defaults.observation!, teamSize:source.config.teamSize ?? defaults.teamSize!}; }
+          void start('train',true);
+        }}>Resume checkpoint</button>
+        {#if selectedCheckpoint}<p class="help-note">Restores {number(selectedCheckpoint.metadata.steps)} steps / {number(selectedCheckpoint.metadata.iteration)} updates. Planned total: {number(selectedCheckpoint.metadata.steps + samplesPerUpdate() * Number(config.iterations))} steps. Network size, observation and team size are restored from the source run.</p>{/if}
+      </section>
       <div class="toolbar">
         <button onclick={exportConfig}>Export config</button><label class="file-button"
           >Import config<input type="file" accept=".json" onchange={importConfig} /></label
@@ -617,7 +746,7 @@
             notice = 'Baseline restored.';
           }}>Reset to baseline</button
         ><label class="field training-target" for="training-step-target"
-          ><span>Stop after agent steps</span><input
+          ><span>Additional agent steps</span><input
             id="training-step-target"
             type="number"
             min={samplesPerUpdate()}
@@ -654,6 +783,16 @@
                 >{/if}{/each}
           </div>
         </section>{/each}
+    {:else if page === 'Graphs'}
+      <div class="toolbar graph-controls">
+        <label>Metrics<select bind:value={graphGroup}>{#each Object.keys(graphFields) as group}<option>{group}</option>{/each}</select></label>
+        <label>Visible history<select bind:value={graphWindow}><option value={0}>All loaded updates</option><option value={100}>Last 100 updates</option><option value={500}>Last 500 updates</option></select></label>
+        <label>Smoothing · {smoothing.toFixed(2)}<input aria-label="Chart smoothing" type="range" min="0" max="0.95" step="0.05" bind:value={smoothing} /></label>
+        <label>Compare run<select bind:value={comparePath} onchange={compare}><option value="">None</option>{#each runs as run}<option value={run.path}>{run.config.name} · {run.id}</option>{/each}</select></label>
+      </div>
+      <p class="help-note">Solid line: exponential moving average. Faint line: raw measurements. Dashed line: comparison. Drag to zoom; Fit data restores live tracking. Axes use cumulative agent steps. Live history keeps the latest 2,000 updates; load a saved run for full history.</p>
+      <div class="charts-grid">{#each graphFields[graphGroup] as chart (chart.field)}<Chart rows={graphRows} {...chart} {smoothing} {comparison} height={260} />{/each}</div>
+      {#if runPath}<p class="path">{runPath}</p>{/if}
     {:else if page === 'Rewards'}
       <div class="section-intro">
         <h2>Give progress a direction.</h2>
@@ -709,6 +848,16 @@
       <MatchView {frame} large={true} />{#if evaluation}<div class="alert notice" role="status">
           {evaluation}
         </div>{/if}
+      <section class="resume-panel">
+        <h2>Skill estimate</h2>
+        {#if skill}<div class="metric-strip">
+          <div><span>Relative Elo performance</span><strong>{skill.eloDifference >= 0 ? '+' : ''}{skill.eloDifference}</strong><small>Blue relative to the evaluated orange checkpoint</small></div>
+          <div><span>Blue score rate</span><strong>{number(skill.scoreRate*100,1)}%</strong><small>Wins + half of draws / matches</small></div>
+          <div><span>Evaluation sample</span><strong>{skill.matches}</strong><small>{skill.matches < 100 ? 'Provisional · use 100+ matches and swap sides' : 'Swap sides to check arena or kickoff bias'}</small></div>
+          <div><span>Ranked MMR</span><strong>Uncalibrated</strong><small>No ranked opponent reference set</small></div>
+        </div><p class="path">Blue: {evalResult?.blue}<br />Orange: {evalResult?.orange}</p>
+        {:else}<p class="help-note">Evaluate two saved checkpoints to estimate relative playing strength. Real Rocket League MMR needs calibration against rated opponents; training reward cannot supply it.</p>{/if}
+      </section>
       <p class="help-note">
         Each evaluation match ends at the first goal or the saved episode time limit. A time limit
         is a draw. Compare equal settings over many matches; these results are not ranked-game
@@ -762,21 +911,26 @@
           <div class="eyebrow">EXPERIMENT PARTNER</div>
           <h2>Make the next change<br />an informed one.</h2>
           <p>
-            Ask about the current configuration and the last 30 updates. The AI receives that
-            context only when you send a question. Suggestions are reviewed before application.
+            Your configuration, rewards and last 30 PPO updates become the prompt automatically.
+            Add an optional note, then let NeoToken tune the experiment. Reward changes reach the
+            active trainer; learning settings are prepared for the next session.
           </p>
-          <label for="question">Your question</label><textarea
+          <p class="help-note">{assistantSettings?.provider ?? 'NeoToken'} · {model || 'Loading recommended model'} · {Math.min(rows.length,30)} updates available</p>
+          <label for="question">Optional note</label><textarea
             id="question"
             bind:value={question}
-            rows="5"></textarea>
+            rows="3" placeholder="For example: prioritize reliable ball contact and reduce idle behavior."></textarea>
+          <label class="toggle-field"><input type="checkbox" bind:checked={autoApply} /> Apply validated tuning automatically</label>
+          <label class="toggle-field"><input type="checkbox" bind:checked={autoTune} disabled={!native || !assistantSettings?.keyConfigured} /> Tune periodically during training</label>
+          {#if autoTune}<label class="field"><span>Updates between tuning requests</span><input type="number" min="10" max="10000" step="1" value={tuneEvery} onchange={(e)=>{tuneEvery=Math.max(10,Math.min(10000,Math.round(e.currentTarget.valueAsNumber)||25));}} /><small>Requires 10 observed updates; at most one request per minute. Disable to stop future scheduled requests.</small></label>{/if}
           <div class="toolbar">
-            <button class="primary" disabled={asking || !model || !native} onclick={ask}
-              >{asking ? 'Analyzing…' : 'Ask AI assistant'}</button
-            ><button onclick={localReview}>Local diagnostic</button>
+            <button class="primary" disabled={asking || applying || !model || !native || !assistantSettings?.keyConfigured} onclick={() => ask()}
+              >{asking ? 'Tuning experiment…' : 'Tune with AI'}</button
+            ><button disabled={asking || applying} onclick={localReview}>Local diagnostic</button>
           </div>
           <small
             >The local diagnostic uses fixed rules and works without an API key. AI requests use
-            your OpenAI API account and may incur charges.</small
+            the NeoToken key in your OpenCode configuration and consume API credits. Only configuration and numeric metrics are sent; keys and local file paths stay on this machine.</small
           >
         </section>
         <section class="proposal-panel">
@@ -784,17 +938,19 @@
             <h3>Suggested experiment</h3>
             <span>{Object.keys(proposal?.changes ?? {}).length} changes</span>
           </div>
-          {#if proposal}<p class="proposal-text" data-selectable>{proposal.explanation}</p>
+          {#if proposal}{#if proposal.usage}<p class="help-note">{proposal.model} · {number(proposal.usage.total_tokens)} tokens ({number(proposal.usage.prompt_tokens)} input / {number(proposal.usage.completion_tokens)} output)</p>{/if}<p class="proposal-text" data-selectable>{proposal.explanation}</p>
             {#each Object.entries(proposal.changes) as [key, value]}<div class="proposal-change">
-                <span>{label(key)}</span><del>{config[key]}</del><strong>{value}</strong>
+                <span>{label(key)}</span><del>{proposalBefore[key]}</del><strong>{value}</strong>
               </div>{/each}{#if Object.keys(proposal.changes).length}<button
                 class="primary"
-                onclick={applyProposal}>Apply reviewed changes</button
+                disabled={proposalApplied || applying}
+                onclick={() => safely(applyProposal)}>{proposalApplied ? 'Changes applied' : 'Apply changes'}</button
               >{/if}{:else}<p class="muted">
               A proposal will appear here with the explanation and exact setting changes.
             </p>{/if}
         </section>
       </div>
+      {#if tuneHistory.length}<section class="settings-section"><h2>Tuning history</h2>{#each tuneHistory as entry}<details><summary>{entry.time} · {Object.keys(entry.changes).length} changes · {entry.applied ? 'Applied' : 'Proposed'}</summary><p class="proposal-text">{entry.explanation}</p><pre>{JSON.stringify(entry.changes,null,2)}</pre></details>{/each}</section>{/if}
     {:else if page === 'Learn'}
       <div class="docs-layout">
         <aside class="docs-nav">
@@ -822,38 +978,15 @@
         </div>
       </section>
       <section class="settings-section">
-        <h2>AI assistant</h2>
+        <h2>NeoToken assistant</h2>
+        <p class="help-note">Connection and key are read from your OpenCode configuration in the native backend. The key never enters this interface.</p>
         <div class="fields-grid">
-          <label class="field"
-            ><span>OpenAI API key</span><input
-              type="password"
-              bind:value={apiKey}
-              autocomplete="off"
-              placeholder="Stored in Windows Credential Manager"
-            /><small>Your key stays in the operating system credential vault.</small></label
-          ><label class="field"
-            ><span>Model ID</span><input
-              bind:value={model}
-              placeholder="Enter a Responses API model available to your account"
-            /><small>Use an exact model ID from your OpenAI account.</small></label
-          >
+          <label class="field"><span>Model</span><select bind:value={model} disabled={!assistantSettings?.models.length}>{#each assistantSettings?.models ?? [] as option}<option value={option}>{option}{option === assistantSettings?.defaultModel ? ' · recommended' : ''}</option>{/each}</select><small>The recommended model balances reasoning quality and per-request cost. See Assistant models in Learn for the research.</small></label>
+          <div class="field"><span>Connection</span><strong>{assistantSettings?.keyConfigured ? 'Key configured' : native ? 'Not configured' : 'Available in desktop app'}</strong><small>{assistantSettings?.baseUrl ?? 'Read from OpenCode on desktop'}</small></div>
         </div>
-        <button
-          disabled={!apiKey || !native}
-          onclick={() =>
-            safely(async () => {
-              await invoke('save_api_key', { key: apiKey });
-              apiKey = '';
-              notice = 'API key saved in Windows Credential Manager.';
-            })}>Save API key</button
-        ><button
-          disabled={!native}
-          onclick={() =>
-            safely(async () => {
-              await invoke('save_api_key', { key: '' });
-              notice = 'Saved API key removed.';
-            })}>Remove key</button
-        >
+        {#if assistantSettings?.message}<p class="help-note">{assistantSettings.message}</p>{/if}
+        {#if assistantSettings?.keyConfigured && assistantSettings.catalogAvailable === false}<p class="help-note">Live catalog unavailable. Showing the recommended model; refresh when connected.</p>{/if}
+        <button disabled={!native || asking} onclick={() => safely(loadAssistantSettings)}>Refresh connection & models</button>
       </section>
       <section class="settings-section">
         <h2>Engine diagnostics</h2>

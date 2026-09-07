@@ -6,6 +6,7 @@
 #include <omp.h>
 #include <chrono>
 #include <fstream>
+#include <limits>
 #include <thread>
 
 namespace rls {
@@ -69,7 +70,7 @@ void Save(Network& network, torch::optim::Adam& optimizer, const Json& config,
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
     if (ec) throw std::filesystem::filesystem_error("rename failed", staging, target, ec);
-    emit({{"type", "checkpoint"}, {"path", target.string()}, {"iteration", iteration}});
+    emit({{"type", "checkpoint"}, {"path", target.string()}, {"iteration", iteration}, {"steps", steps}});
 }
 /// Commands apply at decision boundaries. Pausing never changes rollout contents.
 bool Commands(Json& config, const Emit& emit, const Control& control) {
@@ -125,6 +126,11 @@ void Train(Json config, const std::filesystem::path& run, const std::filesystem:
         const auto metadata = ReadJson(checkpoint / "metadata.json");
         if (metadata.value("formatVersion", 0) != 1 || metadata.value("actionVersion", "") != "discrete90_v1")
             throw std::runtime_error("Unsupported checkpoint format");
+        if (!metadata.contains("iteration") || !metadata["iteration"].is_number_integer()
+            || !metadata.contains("steps") || !metadata["steps"].is_number_integer()
+            || metadata["iteration"] < 0 || metadata["iteration"] > std::numeric_limits<int>::max() - config["iterations"].get<int>()
+            || metadata["steps"] < 0 || metadata["steps"] > std::numeric_limits<int64_t>::max())
+            throw std::runtime_error("Invalid checkpoint progress counters");
         torch::load(network, (checkpoint / "model.pt").string(), device);
         torch::serialize::InputArchive archive;
         archive.load_from((checkpoint / "optimizer.pt").string(), device); optimizer.load(archive);
@@ -132,9 +138,19 @@ void Train(Json config, const std::filesystem::path& run, const std::filesystem:
             static_cast<torch::optim::AdamOptions&>(group.options()).lr(config["learningRate"].get<double>());
         iteration = metadata["iteration"]; steps = metadata["steps"];
     }
+    const int initialIteration = iteration;
+    const int64_t initialSteps = steps;
+    const int finalIteration = iteration + config["iterations"].get<int>();
+    const int64_t plannedSteps = static_cast<int64_t>(batch) * config["iterations"].get<int>();
+    if (steps > std::numeric_limits<int64_t>::max() - plannedSteps)
+        throw std::runtime_error("Training step counter would overflow");
     if (std::filesystem::exists(run)) throw std::runtime_error("Run directory already exists; choose a new run name/path");
     std::filesystem::create_directories(run);
     WriteJson(run / "config.json", config);
+    const Json progress{{"initialIteration", initialIteration}, {"initialSteps", initialSteps},
+        {"targetIteration", finalIteration}, {"resumed", !checkpoint.empty()},
+        {"checkpoint", checkpoint.empty() ? Json(nullptr) : Json(checkpoint.string())}};
+    WriteJson(run / "metadata.json", progress);
     std::ofstream metricsFile(run / "metrics.jsonl");
     std::vector<std::unique_ptr<RocketSimBackend>> arenas;
     for (int i = 0; i < count; ++i) arenas.push_back(std::make_unique<RocketSimBackend>(spec, SplitMix64(config["seed"].get<u64>() + i)));
@@ -146,10 +162,12 @@ void Train(Json config, const std::filesystem::path& run, const std::filesystem:
             obs->BuildBatch(arenas[a]->State(), arenas[a]->State(), arenas[a]->Pads(), spec, {data + a * cars * width, width, cars});
     };
     encode();
-    emit({{"type", "started"}, {"run", run.string()}, {"device", device.str()}, {"config", config}, {"obsSize", width}});
+    Json started = progress;
+    started.update({{"type", "started"}, {"run", run.string()}, {"device", device.str()},
+        {"config", config}, {"obsSize", width}, {"iteration", iteration}, {"steps", steps}});
+    emit(started);
     const auto start = Clock::now();
     auto lastFrame = start;
-    const int finalIteration = iteration + config["iterations"].get<int>();
     bool running = true;
     while (iteration < finalIteration && running) {
         const auto iterationStart = Clock::now();
@@ -201,7 +219,7 @@ void Train(Json config, const std::filesystem::path& run, const std::filesystem:
             }
             for (int a = 0; a < count; ++a) if (reset[a]) arenas[a]->Reset();
             encode();
-            ++completed; steps += agents;
+            ++completed;
         }
         if (completed != horizon) break; // Never optimize a partially filled buffer.
         auto advantages = torch::zeros_like(rewards);
@@ -245,11 +263,15 @@ void Train(Json config, const std::filesystem::path& run, const std::filesystem:
             }
         }
         ++iteration;
+        // Count only transitions used in a completed optimizer update. A stopped
+        // partial rollout is discarded, so it must not inflate saved progress.
+        steps += batch;
         const double seconds = std::chrono::duration<double>(Clock::now() - iterationStart).count();
         const auto target = advantages + values;
         const double variance = target.var(false).item<double>();
         const double explained = variance > 1e-12 ? 1 - (target - values).var(false).item<double>() / variance : 0;
         Json metrics{{"type", "metrics"}, {"iteration", iteration}, {"steps", steps}, {"reward", rewards.mean().item<double>()},
+            {"sessionIteration", iteration - initialIteration}, {"sessionSteps", steps - initialSteps},
             {"policyLoss", policyLoss / updates}, {"valueLoss", valueLoss / updates}, {"entropy", entropy / updates},
             {"kl", kl / updates}, {"clipFraction", clipped / updates}, {"explainedVariance", explained},
             {"stepsPerSecond", batch / seconds}, {"touches", touches}, {"goals", goals}, {"episodes", episodes},
@@ -259,8 +281,12 @@ void Train(Json config, const std::filesystem::path& run, const std::filesystem:
         if (iteration % config["checkpointEvery"].get<int>() == 0) Save(network, optimizer, config, run, iteration, steps, emit);
     }
     Save(network, optimizer, config, run, iteration, steps, emit);
-    WriteJson(run / "summary.json", {{"status", running ? "completed" : "stopped"}, {"iteration", iteration}, {"steps", steps}});
-    emit({{"type", "status"}, {"status", running ? "completed" : "stopped"}});
+    Json summary{{"status", running ? "completed" : "stopped"}, {"iteration", iteration}, {"steps", steps},
+        {"sessionIteration", iteration - initialIteration}, {"sessionSteps", steps - initialSteps},
+        {"initialIteration", initialIteration}, {"initialSteps", initialSteps}};
+    WriteJson(run / "summary.json", summary);
+    summary["type"] = "status";
+    emit(summary);
 }
 
 void Play(const std::filesystem::path& checkpoint, const std::filesystem::path& opponent,

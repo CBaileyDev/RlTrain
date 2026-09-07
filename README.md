@@ -35,9 +35,14 @@ Rust and Node.js. See [Getting started](docs/getting-started.md).
 - Two-model playback and first-goal/time-limit evaluation, plus a physics benchmark.
 - Tauri/Svelte desktop app: onboarding, three themes, custom window controls, live charts,
   Three.js match view, run library, comparison charts, reward editor, configuration import/export.
-- An optional OpenAI assistant that proposes reviewable changes using selected metrics;
-  API keys are stored in Windows Credential Manager. A clearly labeled rule-based
-  diagnostic works offline.
+- NeoToken tuning with an automatically generated telemetry prompt and optional note;
+  bounded reward changes can apply live and learning settings are staged for the next run.
+  Credentials are read natively from OpenCode; optional periodic tuning and an offline
+  diagnostic are included. See [model selection and cost research](docs/assistant-models.md).
+- Third-person car chase, ball tracking, a detailed procedural stadium, and fullscreen viewing.
+- A Graphs workspace with raw traces, adjustable EMA smoothing, zoom and run overlays.
+- Checkpoint resume directly on Train, with immediate restored and session step counts.
+- Relative checkpoint Elo performance from evaluation matches; ranked MMR stays uncalibrated.
 - In-app learning handbook and a schema-backed explanation for every configuration field.
 
 This is a working learning tool, not a pretrained competitive bot. A short smoke test

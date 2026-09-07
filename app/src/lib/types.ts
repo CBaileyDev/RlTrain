@@ -50,6 +50,8 @@ export interface Rule {
   enum?: string[];
 }
 export interface Proposal {
+  model?: string;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   explanation: string;
   changes: Config;
 }

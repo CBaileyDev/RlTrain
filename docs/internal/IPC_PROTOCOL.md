@@ -21,13 +21,24 @@ small. The app uses a bounded 32-command queue.
 
 ## Events
 
-- started: run directory, actual device, config, observation width.
+- started: run directory, actual device, config, observation width, cumulative
+  `iteration` and `steps`, `initialIteration`, `initialSteps`, `targetIteration`,
+  `resumed` boolean, and `checkpoint` source path (null for a fresh run). Emitted
+  after loading the checkpoint and before the first rollout, so the trainer can
+  immediately display restored progress without waiting for a metrics event.
 - metrics: iteration, steps, reward, policyLoss, valueLoss, entropy, kl, clipFraction,
-  explainedVariance, stepsPerSecond, touches, goals, episodes, elapsedSeconds.
+  explainedVariance, stepsPerSecond, touches, goals, episodes, elapsedSeconds,
+  sessionIteration, sessionSteps. Iteration/steps are cumulative across resumes;
+  session counters and elapsedSeconds cover only this process invocation. Steps
+  count agent transitions used in completed PPO updates, not physics ticks. A
+  discarded partial rollout does not change checkpoint or summary counters.
 - frame: tick, ball xyz, cars (id/team/pos/forward/up/boost/demoed), cumulative score.
-- checkpoint: checkpoint directory and iteration.
+- checkpoint: checkpoint directory, iteration and cumulative steps.
 - config: acknowledged active configuration.
-- status: running, paused, playing, completed or stopped.
+- status: running, paused, playing, completed or stopped. Final training statuses
+  also carry iteration, steps, initialIteration, initialSteps, sessionIteration,
+  and sessionSteps. Run metadata.json persists resume origin and initial counters;
+  summary.json persists final counters.
 - evaluation: completed matches, blueWins, orangeWins, draws.
 - benchmark: physicsTicksPerSecond and agentStepsPerSecond for one arena.
 - error: human-readable message. Fatal command failures also exit nonzero.

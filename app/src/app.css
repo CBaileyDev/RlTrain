@@ -1080,3 +1080,13 @@ footer span {
   border-top: 1px solid var(--border);
   margin: 30px 0;
 }
+.resume-panel { padding:22px; border:1px solid var(--border); border-radius:8px; background:var(--panel); margin-bottom:24px; display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.resume-panel h2 { font-size:18px; }
+.resume-panel > .field { flex:1; min-width:200px; }
+.resume-panel > .help-note, .resume-panel > .metric-strip, .resume-panel > .path { width:100%; }
+.resume-panel .metric-strip { margin:0; padding:16px 0; border:0; }
+.resume-panel .metric-strip strong { font-size:25px; }
+.toggle-field { display:flex; align-items:center; gap:10px; margin:14px 0; color:var(--text); font-size:12px; }
+.toggle-field input { width:16px; height:16px; accent-color:var(--accent); }
+.graph-controls label { display:flex; flex-direction:column; gap:8px; color:var(--muted); font-size:12px; flex:1; min-width:145px; }
+.graph-controls input { accent-color:var(--accent); }
