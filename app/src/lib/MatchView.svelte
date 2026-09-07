@@ -7,9 +7,10 @@
   let container: HTMLDivElement;
   let panel: HTMLElement;
   let failure = $state('');
-  let mode = $state<'orbit' | 'ball' | 'chase'>('orbit');
+  let mode = $state<'orbit' | 'ball' | 'chase' | 'director'>('orbit');
   let selected = $state(-1);
   let distance = $state(9);
+  let smoothing = $state<'tight' | 'normal' | 'loose'>('normal');
   let reset = $state(0);
   let stale = $state(false);
   const followed = $derived(frame?.cars.find((car) => car.id === selected) ?? frame?.cars[0]);
@@ -35,7 +36,7 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.25;
+    renderer.toneMappingExposure = 1.4;
     container.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog('#09121e', 140, 330);
@@ -56,7 +57,7 @@
     const sun = new THREE.DirectionalLight('#ecf6ff', 3.3);
     sun.position.set(-28, 70, 20);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(4096, 4096);
     Object.assign(sun.shadow.camera, {
       left: -68,
       right: 68,
@@ -76,23 +77,23 @@
       return new THREE.MeshStandardMaterial({ color, roughness, metalness });
     }
     const turfCanvas = document.createElement('canvas');
-    turfCanvas.width = 512;
-    turfCanvas.height = 512;
+    turfCanvas.width = 1024;
+    turfCanvas.height = 1024;
     const ctx = turfCanvas.getContext('2d');
     if (ctx) {
       ctx.fillStyle = '#285a4b';
-      ctx.fillRect(0, 0, 512, 512);
-      for (let i = 0; i < 16; i++) {
+      ctx.fillRect(0, 0, 1024, 1024);
+      for (let i = 0; i < 32; i++) {
         ctx.fillStyle = i % 2 ? '#285347' : '#306150';
-        ctx.fillRect(0, i * 32, 512, 32);
+        ctx.fillRect(0, i * 32, 1024, 32);
       }
-      // Deterministic grass grain keeps the arena consistent across mounts.
+      // Enhanced grass grain with finer detail
       let seed = 731;
-      for (let i = 0; i < 22000; i++) {
+      for (let i = 0; i < 88000; i++) {
         seed = (seed * 16807) % 2147483647;
-        const x = seed % 512;
+        const x = seed % 1024;
         seed = (seed * 16807) % 2147483647;
-        const y = seed % 512;
+        const y = seed % 1024;
         ctx.fillStyle = i % 2 ? '#ffffff09' : '#0000000b';
         ctx.fillRect(x, y, 1, 2);
       }
@@ -166,7 +167,7 @@
       const glow = new THREE.MeshStandardMaterial({
         color: teamColor,
         emissive: teamColor,
-        emissiveIntensity: 1.8,
+        emissiveIntensity: 2.7,
       });
       box(0.3, 1.1, 102.4, sign * 41.1, 0.55, 0, trim);
       box(0.12, 0.08, 102.4, sign * 40.93, 1.13, 0, glow);
@@ -177,6 +178,27 @@
       for (const x of [-8.93, 8.93]) box(0.25, 6.43, 0.25, x, 3.215, sign * 51.2, glow);
       box(18.1, 0.25, 0.25, 0, 6.43, sign * 51.2, glow);
       box(17.86, 0.08, 8.8, 0, 0.04, sign * 55.6, material(sign > 0 ? '#194a70' : '#704329'));
+      
+      // Enhanced goal nets with mesh and wireframe overlay
+      const netGeometry = new THREE.PlaneGeometry(17.86, 6.43, 16, 8);
+      const netMaterial = new THREE.MeshBasicMaterial({
+        color: '#8396a7',
+        transparent: true,
+        opacity: 0.25,
+        side: THREE.DoubleSide,
+      });
+      const netMesh = new THREE.Mesh(netGeometry, netMaterial);
+      netMesh.position.set(0, 3.215, sign * 51.2);
+      scene.add(netMesh);
+      
+      const netWireframe = new THREE.LineSegments(
+        new THREE.EdgesGeometry(netGeometry),
+        new THREE.LineBasicMaterial({ color: '#8396a7', opacity: 0.5, transparent: true }),
+      );
+      netWireframe.position.copy(netMesh.position);
+      scene.add(netWireframe);
+      
+      // Keep existing goal net lines for depth
       for (let x = -8.9; x <= 9; x += 1.12) {
         line(
           [
@@ -209,8 +231,8 @@
         fieldWhite,
         0.65,
       );
-      // Stadium seating outside the playable bounds, with illuminated fascia.
-      for (let tier = 0; tier < 3; tier++) {
+      // Stadium seating with 4 tiers and spot lights
+      for (let tier = 0; tier < 4; tier++) {
         box(
           5,
           2.5,
@@ -221,9 +243,23 @@
           material(tier % 2 ? '#182c40' : '#22394b'),
         );
         box(0.1, 0.1, 117, sign * (44.5 + tier * 5), 3.3 + tier * 3.5, 0, glow);
+        
+        // Add spot lights on 4th tier
+        if (tier === 3) {
+          for (let z = -45; z <= 45; z += 30) {
+            const spotLight = new THREE.SpotLight(teamColor, 15, 80, Math.PI / 6, 0.5);
+            spotLight.position.set(sign * (47 + tier * 5), 4.5 + tier * 3.5, z);
+            spotLight.target.position.set(0, 0, z * 0.3);
+            scene.add(spotLight);
+            scene.add(spotLight.target);
+          }
+        }
       }
     }
     const ball = new THREE.Group();
+    const ballLight = new THREE.PointLight('#ffffff', 0, 15);
+    ballLight.castShadow = false;
+    ball.add(ballLight);
     const sphere = new THREE.Mesh(
       new THREE.SphereGeometry(0.9125, 40, 28),
       material('#e2e9dd', 0.37, 0.18),
@@ -261,6 +297,73 @@
     ball.position.y = 0.93;
     ball.visible = false;
     scene.add(ball);
+    
+    // Boost pad visualization system (34 pads total: 6 large, 28 small)
+    const boostPads: THREE.Group[] = [];
+    const boostPadLocations = [
+      // Large boost pads (corners)
+      { x: -30.72, z: -40.96, large: true },
+      { x: 30.72, z: -40.96, large: true },
+      { x: -30.72, z: 40.96, large: true },
+      { x: 30.72, z: 40.96, large: true },
+      { x: -36.86, z: 0, large: true },
+      { x: 36.86, z: 0, large: true },
+      // Small boost pads (approximate standard positions)
+      { x: 0, z: -44.8, large: false },
+      { x: 0, z: 44.8, large: false },
+      { x: -20.48, z: -30.72, large: false },
+      { x: 20.48, z: -30.72, large: false },
+      { x: -20.48, z: 30.72, large: false },
+      { x: 20.48, z: 30.72, large: false },
+      { x: -30.72, z: -20.48, large: false },
+      { x: 30.72, z: -20.48, large: false },
+      { x: -30.72, z: 20.48, large: false },
+      { x: 30.72, z: 20.48, large: false },
+      { x: -10.24, z: -51.2, large: false },
+      { x: 10.24, z: -51.2, large: false },
+      { x: -10.24, z: 51.2, large: false },
+      { x: 10.24, z: 51.2, large: false },
+      { x: -40.96, z: -15.36, large: false },
+      { x: 40.96, z: -15.36, large: false },
+      { x: -40.96, z: 15.36, large: false },
+      { x: 40.96, z: 15.36, large: false },
+      { x: 0, z: -20.48, large: false },
+      { x: 0, z: 20.48, large: false },
+      { x: -15.36, z: 0, large: false },
+      { x: 15.36, z: 0, large: false },
+    ];
+    
+    for (const loc of boostPadLocations) {
+      const padGroup = new THREE.Group();
+      const radius = loc.large ? 1.2 : 0.6;
+      const padGeometry = new THREE.CylinderGeometry(radius, radius, 0.08, 16);
+      const padMaterial = new THREE.MeshStandardMaterial({
+        color: '#ffaa22',
+        emissive: '#ffaa22',
+        emissiveIntensity: 1.5,
+        roughness: 0.3,
+      });
+      const pad = new THREE.Mesh(padGeometry, padMaterial);
+      pad.position.set(loc.x / 100, 0.04, -loc.z / 100);
+      padGroup.add(pad);
+      
+      // Glow ring effect
+      const glowGeometry = new THREE.RingGeometry(radius * 0.9, radius * 1.1, 24);
+      const glowMaterial = new THREE.MeshBasicMaterial({
+        color: '#ffcc44',
+        transparent: true,
+        opacity: 0.4,
+        side: THREE.DoubleSide,
+      });
+      const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+      glow.rotation.x = -Math.PI / 2;
+      glow.position.set(loc.x / 100, 0.06, -loc.z / 100);
+      padGroup.add(glow);
+      
+      scene.add(padGroup);
+      boostPads.push(padGroup);
+    }
+    
     const marker = new THREE.Mesh(
       new THREE.RingGeometry(1.25, 1.38, 48),
       new THREE.MeshBasicMaterial({
@@ -280,7 +383,27 @@
     function createCar(team: number) {
       const car = new THREE.Group();
       const paint = material(team ? '#f79939' : '#378eff', 0.28, 0.45);
-      box(1.42, 0.33, 0.88, 0, 0.02, 0, paint, car);
+      
+      // Improved car body with beveled edges using ExtrudeGeometry
+      const bodyShape = new THREE.Shape();
+      bodyShape.moveTo(-0.71, -0.44);
+      bodyShape.lineTo(0.71, -0.44);
+      bodyShape.lineTo(0.71, 0.44);
+      bodyShape.lineTo(-0.71, 0.44);
+      bodyShape.closePath();
+      const bodyGeometry = new THREE.ExtrudeGeometry(bodyShape, {
+        depth: 0.33,
+        bevelEnabled: true,
+        bevelThickness: 0.02,
+        bevelSize: 0.02,
+        bevelSegments: 3,
+      });
+      bodyGeometry.center();
+      const bodyMesh = new THREE.Mesh(bodyGeometry, paint);
+      bodyMesh.position.y = 0.02;
+      bodyMesh.castShadow = true;
+      car.add(bodyMesh);
+      
       box(0.68, 0.29, 0.7, -0.12, 0.3, 0, glass, car);
       box(0.54, 0.055, 0.72, -0.16, 0.465, 0, paint, car);
       box(0.36, 0.06, 0.94, -0.64, 0.31, 0, paint, car);
@@ -315,6 +438,9 @@
           car,
         );
       }
+      
+      // Animated wheels stored in userData for later rotation
+      car.userData.wheels = [];
       for (const x of [-0.47, 0.47])
         for (const z of [-0.47, 0.47]) {
           const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.16, 20), rubber);
@@ -322,11 +448,27 @@
           wheel.position.set(x, -0.14, z);
           wheel.castShadow = true;
           car.add(wheel);
+          car.userData.wheels.push(wheel);
           const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.105, 0.17, 12), chrome);
           hub.rotation.x = Math.PI / 2;
           hub.position.copy(wheel.position);
           car.add(hub);
         }
+      
+      // Boost flame effect (initially invisible)
+      const flameGeometry = new THREE.ConeGeometry(0.12, 0.6, 8);
+      const flameMaterial = new THREE.MeshBasicMaterial({
+        color: team ? '#ffaa44' : '#44aaff',
+        transparent: true,
+        opacity: 0.85,
+      });
+      const flame = new THREE.Mesh(flameGeometry, flameMaterial);
+      flame.rotation.x = Math.PI / 2;
+      flame.position.set(-0.85, 0, 0);
+      flame.visible = false;
+      car.add(flame);
+      car.userData.flame = flame;
+      
       scene.add(car);
       return car;
     }
@@ -344,6 +486,7 @@
       oldReset = reset;
     const gaze = new THREE.Vector3(),
       target = new THREE.Vector3();
+    let lastBallPos = new THREE.Vector3();
     const resize = new ResizeObserver(() => {
       const width = Math.max(container.clientWidth, 1),
         height = Math.max(container.clientHeight, 1);
@@ -355,8 +498,15 @@
     function render(now: number) {
       const dt = Math.min(Math.max((now - previousTime) / 1000, 0), 0.1);
       previousTime = now;
-      const blend = 1 - Math.exp(-18 * dt),
-        cameraBlend = 1 - Math.exp(-7 * dt);
+      
+      // Dynamic smoothing based on user preference
+      const smoothingFactors = { tight: 22, normal: 18, loose: 12 };
+      const smoothFactor = smoothingFactors[smoothing];
+      const blend = 1 - Math.exp(-smoothFactor * dt);
+      
+      const cameraBlendFactors = { tight: 10, normal: 7, loose: 4 };
+      const cameraBlend = 1 - Math.exp(-cameraBlendFactors[smoothing] * dt);
+      
       const changed = frame !== lastFrame;
       const discontinuity = !!(
         frame &&
@@ -376,16 +526,50 @@
         gaze.copy(controls.target);
         oldMode = mode;
       }
-      controls.enabled = mode !== 'chase';
+      controls.enabled = mode !== 'chase' && mode !== 'director';
       ball.visible = marker.visible = !!frame;
+      
+      // Animate boost pads with pulsing glow
+      for (let i = 0; i < boostPads.length; i++) {
+        const pad = boostPads[i];
+        if (pad && pad.children.length >= 2) {
+          const pulse = Math.sin(now * 0.003 + i * 0.5) * 0.5 + 0.5;
+          const glowMesh = pad.children[1] as THREE.Mesh;
+          const padMesh = pad.children[0] as THREE.Mesh;
+          if (glowMesh.material && padMesh.material) {
+            (glowMesh.material as THREE.MeshBasicMaterial).opacity = 0.2 + pulse * 0.3;
+            (padMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.2 + pulse * 0.8;
+          }
+        }
+      }
+      
       if (frame) {
         const ballTarget = position(frame.ball);
+        
+        // Improved ball rotation using position delta
+        const ballDelta = new THREE.Vector3().subVectors(ballTarget, lastBallPos);
+        if (!discontinuity && ballDelta.length() > 0.001) {
+          const radius = 0.9125;
+          const rotationAxis = new THREE.Vector3(-ballDelta.z, 0, ballDelta.x).normalize();
+          const rotationAngle = ballDelta.length() / radius;
+          const deltaRotation = new THREE.Quaternion().setFromAxisAngle(rotationAxis, rotationAngle);
+          ball.quaternion.multiplyQuaternions(deltaRotation, ball.quaternion);
+        }
+        lastBallPos.copy(ballTarget);
+        
         if (discontinuity || ball.position.distanceTo(ballTarget) > 25 || !ball.userData.ready)
           ball.position.copy(ballTarget);
         else ball.position.lerp(ballTarget, blend);
         ball.userData.ready = true;
         marker.position.set(ball.position.x, 0.065, ball.position.z);
         marker.scale.setScalar(1 + Math.min(ball.position.y / 20, 1));
+        
+        // Dynamic ball lighting based on height and position
+        const heightFactor = Math.min(ball.position.y / 20, 1);
+        const intensity = 8 + heightFactor * 12;
+        ballLight.intensity = intensity;
+        const hue = (ball.position.x + 41) / 82;
+        ballLight.color.setHSL(hue * 0.15 + 0.55, 0.7, 0.6);
         for (const state of frame.cars) {
           let car = cars.get(state.id);
           if (!car) {
@@ -394,12 +578,38 @@
           }
           const carTarget = position(state.pos),
             wasHidden = !car.visible;
-          car.visible = !state.demoed;
+          car.visible = true;
+          
+          // Demo transparency effect
+          if (state.demoed) {
+            car.traverse((obj) => {
+              if (obj instanceof THREE.Mesh && obj.material) {
+                const mat = obj.material as THREE.MeshStandardMaterial;
+                if (!mat.transparent) {
+                  mat.transparent = true;
+                  mat.needsUpdate = true;
+                }
+                mat.opacity = 0.15;
+              }
+            });
+          } else {
+            car.traverse((obj) => {
+              if (obj instanceof THREE.Mesh && obj.material) {
+                const mat = obj.material as THREE.MeshStandardMaterial;
+                mat.opacity = 1.0;
+              }
+            });
+          }
+          
           const snap =
             discontinuity ||
             wasHidden ||
             !car.userData.ready ||
             car.position.distanceTo(carTarget) > 25;
+          
+          // Calculate movement delta for wheel rotation
+          const moveDelta = snap ? 0 : car.position.distanceTo(carTarget);
+          
           if (snap) car.position.copy(carTarget);
           else car.position.lerp(carTarget, blend);
           const forward = direction(state.forward).normalize(),
@@ -413,10 +623,63 @@
             if (snap) car.quaternion.copy(rotation);
             else car.quaternion.slerp(rotation, blend);
           }
+          
+          // Animate wheels based on position delta
+          if (car.userData.wheels && moveDelta > 0.001) {
+            const wheelRotation = moveDelta / 0.22;
+            for (const wheel of car.userData.wheels) {
+              wheel.rotation.y += wheelRotation;
+            }
+          }
+          
+          // Boost flame effect (visible when boost > 0 and moving)
+          if (car.userData.flame) {
+            const isBoostActive = state.boost > 0 && moveDelta > 0.05 && !state.demoed;
+            car.userData.flame.visible = isBoostActive;
+            if (isBoostActive) {
+              const flicker = 0.9 + Math.sin(now * 0.03) * 0.1;
+              car.userData.flame.scale.setScalar(flicker);
+            }
+          }
+          
           car.userData.ready = true;
         }
         for (const [id, car] of cars) if (!frame.cars.some((c) => c.id === id)) car.visible = false;
         if (mode === 'ball') controls.target.lerp(ball.position, cameraBlend);
+        if (mode === 'director') {
+          // Director mode: auto-follow the car closest to the ball
+          let closestCar = null;
+          let closestDist = Infinity;
+          for (const state of frame.cars) {
+            const car = cars.get(state.id);
+            if (car && car.visible) {
+              const dist = car.position.distanceTo(ball.position);
+              if (dist < closestDist) {
+                closestDist = dist;
+                closestCar = car;
+              }
+            }
+          }
+          if (closestCar) {
+            const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(closestCar.quaternion);
+            forward.y = 0;
+            if (forward.lengthSq() < 0.01) forward.set(1, 0, 0);
+            else forward.normalize();
+            target
+              .copy(closestCar.position)
+              .addScaledVector(forward, -distance)
+              .add(new THREE.Vector3(0, distance * 0.32 + 1, 0));
+            target.y = Math.max(target.y, 1.3);
+            camera.position.lerp(target, cameraBlend);
+            target
+              .copy(closestCar.position)
+              .addScaledVector(forward, 4)
+              .add(new THREE.Vector3(0, 0.75, 0));
+            gaze.lerp(target, cameraBlend);
+            camera.lookAt(gaze);
+            controls.target.copy(gaze);
+          }
+        }
         if (mode === 'chase') {
           const car = followed ? cars.get(followed.id) : undefined;
           if (car) {
@@ -443,7 +706,7 @@
       } else {
         for (const car of cars.values()) car.visible = false;
       }
-      if (mode !== 'chase') controls.update(dt);
+      if (mode !== 'chase' && mode !== 'director') controls.update(dt);
       renderer.render(scene, camera);
       request = requestAnimationFrame(render);
     }
@@ -508,19 +771,26 @@
         onclick={() => (mode = 'ball')}>Ball tracking</button
       >
       <button
+        class:chosen={mode === 'director'}
+        aria-pressed={mode === 'director'}
+        onclick={() => (mode = 'director')}>Director</button
+      >
+      <button
         class:chosen={mode === 'chase'}
         aria-pressed={mode === 'chase'}
         onclick={() => (mode = 'chase')}>Third person</button
       >
     </div>
-    {#if mode === 'chase'}
-      <label
-        >Car <select aria-label="Follow car" bind:value={selected}
-          ><option value={-1}>First car</option>{#each frame?.cars ?? [] as car}<option
-              value={car.id}>{car.team ? 'Orange' : 'Blue'} #{car.id}</option
-            >{/each}</select
-        ></label
-      >
+    {#if mode === 'chase' || mode === 'director'}
+      {#if mode === 'chase'}
+        <label
+          >Car <select aria-label="Follow car" bind:value={selected}
+            ><option value={-1}>First car</option>{#each frame?.cars ?? [] as car}<option
+                value={car.id}>{car.team ? 'Orange' : 'Blue'} #{car.id}</option
+              >{/each}</select
+          ></label
+        >
+      {/if}
       <label
         >Distance <input
           aria-label="Chase camera distance"
@@ -530,6 +800,13 @@
           step=".5"
           bind:value={distance}
         /></label
+      >
+      <label
+        >Smoothing <select aria-label="Camera smoothing" bind:value={smoothing}
+          ><option value="tight">Tight</option><option value="normal">Normal</option><option
+            value="loose">Loose</option
+          ></select
+        ></label
       >
     {/if}
     <button
@@ -545,7 +822,9 @@
     <span
       >{mode === 'chase'
         ? 'Car chase · Stable horizon · Select a car above'
-        : 'Drag to orbit · Scroll to zoom · Right-drag to pan'}</span
+        : mode === 'director'
+          ? 'Director mode · Auto-follows closest car to ball'
+          : 'Drag to orbit · Scroll to zoom · Right-drag to pan'}</span
     >{#if followed && mode === 'chase'}<span
         class:orange={followed.team === 1}
         class:blue={followed.team === 0}

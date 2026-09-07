@@ -4,6 +4,7 @@
   import { relativeSkill } from './lib/metrics';
   import MatchView from './lib/MatchView.svelte';
   import Document from './lib/Document.svelte';
+  import ThemeSelector from './lib/ThemeSelector.svelte';
   import schemaData from '../../configs/schema/run.schema.json';
   import teamPreset from '../../configs/presets/3v3-team.json';
   import { invoke, native, errorMessage, label, rewardKeys } from './lib/types';
@@ -969,13 +970,8 @@
     {:else if page === 'Settings'}
       <section class="settings-section">
         <h2>Appearance</h2>
-        <div class="theme-options">
-          {#each [['forest', 'Forest', 'A cool green workspace'], ['midnight', 'Midnight', 'Deep blue and silver'], ['paper', 'Paper', 'A brighter reading space']] as choice}<button
-              class:chosen={theme === choice[0]}
-              onclick={() => (theme = choice[0] ?? 'forest')}
-              ><span>{choice[1]}</span><small>{choice[2]}</small></button
-            >{/each}
-        </div>
+        <p class="help-note">Choose a theme that matches your preference. All themes are designed for WCAG AA compliance with proper contrast ratios.</p>
+        <ThemeSelector value={theme} onChange={(newTheme) => (theme = newTheme)} />
       </section>
       <section class="settings-section">
         <h2>NeoToken assistant</h2>
