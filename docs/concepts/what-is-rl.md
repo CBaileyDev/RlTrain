@@ -68,6 +68,8 @@ Here is the misconception that trips up almost everyone.
 
 So a reward of `-0.3` does not mean "steer harder". It means "that step scored -0.3", and nothing more. On its own that number is not even good or bad — it sits on whatever scale you chose when you wrote the reward function. If the bot usually collects -1.0 per step, then -0.3 was a good step. The absolute size of a reward matters far less than the differences between the rewards of the actions the bot was choosing between.
 
+One caution before you take that too far. The bot is not only choosing between actions. It is also, indirectly, choosing how long the episode lasts, because a goal ends it — see the "Episodes" section below. Shift every step's reward down by a constant and a long episode loses more than a short one, so ending the episode early starts to look attractive. In Rocket League the fastest exit is the nearest net, and the bot's own net counts: an own goal ends the episode exactly as fast as a scored goal. Shift every step's reward up instead and the opposite happens. Every extra step is free reward, so the bot learns to keep the ball in play and never finish. This is not a reason to avoid per-step penalties or bonuses. It is a reason to check, whenever you add one, that the goal term is still large enough to outweigh what a whole episode of that per-step term adds up to. [rewards.md](./rewards.md) works through the weight-times-rate arithmetic.
+
 Whether -0.3 was good or bad depends on what the bot could reasonably have expected from that situation. A -0.3 while sprinting back to cover an open net may be better than average. A -0.3 with the ball sitting on the open goal line is dreadful. Turning a raw reward into "better or worse than expected" is a separate job, done later, and it is what **advantage** does — see the credit assignment section below.
 
 The bot has to work out, from thousands of such numbers across thousands of situations, which of its habits produce good numbers and which produce bad ones. [rewards.md](./rewards.md) covers how to design that number, and what happens when you design it badly.
@@ -124,7 +126,7 @@ This problem is real and it will bite you. [exploration.md](./exploration.md) co
 
 ## Settings that shape the environment side of the loop
 
-Five settings define what the environment even is. Full details will live in the settings reference (`docs/settings-reference.md`), which is not yet written; until it lands, [training-loop.md](./training-loop.md) covers the arena and batch settings and [actions.md](./actions.md) covers tick skip.
+Five settings define what the environment even is. Current field names and defaults are in the [settings reference](../settings-reference.md); [training-loop.md](./training-loop.md) covers the arena and batch settings and [actions.md](./actions.md) covers tick skip.
 
 - **`env.game_mode`** — which Rocket League mode the arena simulates. Soccar is standard play and what these docs assume; switching to another mode changes the rules of the game, so a policy trained in one will not transfer to another.
 - **`env.team_size`** — cars per team, 1 for 1v1 up to 3 for 3v3. Turn it up and the bot must learn positioning and rotation, but credit assignment gets much harder because teammates affect the reward too. Turn it down for the cleanest possible learning signal.

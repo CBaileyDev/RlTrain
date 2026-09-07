@@ -1,128 +1,112 @@
 # RL Studio
 
-A desktop workbench for learning reinforcement learning by training Rocket League bots.
+A local desktop workbench for learning reinforcement learning by training Rocket League
+policies in RocketSim. Configure an experiment, watch simulated play, inspect actual PPO
+metrics, edit rewards, and save or compare checkpoints.
 
-RL Studio trains a neural network to play Rocket League inside a headless physics simulation,
-then shows you what it is learning: live training curves, a 3D view of the bot playing itself,
-a reward editor you can adjust mid-run, and an assistant that reads your metrics and suggests
-changes. Everything runs on your own machine.
+## Run the app
 
-> **What this is for.** This is a learning project. The bots it produces play in a simulator and
-> in RL Studio's own viewer. It has no ability to interact with a live Rocket League match and
-> is not a cheating tool.
+The ready-to-run portable build is in `artifacts/RLStudio`. Open `rl-studio.exe` there.
+Keep the folder together: the engine and its PyTorch runtime live alongside the app.
+Windows 10/11 x64, WebView2, and the Visual C++ 2015–2022 runtime are required.
+CUDA training additionally needs a compatible NVIDIA driver. The CUDA toolkit is needed
+for building this source tree, not for running the packaged app.
 
----
-
-## What is inside
-
-| Piece | What it does |
-|---|---|
-| `rl-engine` | A C++20 trainer. Runs hundreds of Rocket League physics simulations in parallel and trains a policy with PPO on your GPU. Usable on its own from the command line. |
-| RL Studio app | A desktop app that drives the engine, draws the training graphs, renders the 3D match view, and hosts the reward editor, docs and assistant. |
-
-The engine and the app are separate programs that talk over a local WebSocket. You can use the
-engine without the app, which is useful when you want to leave a long run going or script an experiment.
-
-## Requirements
-
-- Windows 10 or 11, 64-bit
-- Visual Studio with the "Desktop development with C++" workload
-- An NVIDIA GPU is strongly recommended. Training works on CPU but is dramatically slower.
-- About 20 GB of free disk space, mostly libtorch
-- Rocket League, but only once, and only to dump arena geometry. See below.
-
-## Getting started
+From this source checkout, build and launch with:
 
 ```powershell
-pwsh -File tools/setup.ps1
+pwsh -File tools/build.ps1 -Test
+pwsh -File tools/build-app.ps1
+pwsh -File tools/start.ps1
 ```
 
-That fetches every dependency, including a roughly 3 GB download of libtorch, and builds the engine.
-It is safe to re-run; each step skips work that is already done.
+For a fresh machine, `tools/setup.ps1` fetches the engine dependencies, and
+`tools/check-env.ps1` diagnoses the toolchain. Building the desktop shell also requires
+Rust and Node.js. See [Getting started](docs/getting-started.md).
 
-Then check your machine:
+## What works
+
+- C++20 RocketSim environments, 1v1 through 4v4, OpenMP arena stepping.
+- A versioned 90-action vocabulary; basic and opponent-aware normalized observations.
+- Actual categorical PPO with GAE, gradient clipping, entropy regularization, CPU/CUDA.
+- Time-limit bootstrapping distinct from terminal goals; configurable action delay.
+- Live reward editing, pause/resume, graceful stop with checkpoint saving.
+- Model and Adam checkpoint save/load; resumed training starts fresh simulator episodes.
+- Two-model playback and first-goal/time-limit evaluation, plus a physics benchmark.
+- Tauri/Svelte desktop app: onboarding, three themes, custom window controls, live charts,
+  Three.js match view, run library, comparison charts, reward editor, configuration import/export.
+- An optional OpenAI assistant that proposes reviewable changes using selected metrics;
+  API keys are stored in Windows Credential Manager. A clearly labeled rule-based
+  diagnostic works offline.
+- In-app learning handbook and a schema-backed explanation for every configuration field.
+
+This is a working learning tool, not a pretrained competitive bot. A short smoke test
+validates the training pipeline, not policy quality. Strong play requires substantial
+training, independent evaluation, and likely further algorithm/reward experimentation.
+There is no integration with live Rocket League matches.
+
+## Choose your arena
+
+**Practice Arena** is generated automatically and contains no game assets. It approximates
+field dimensions, walls, corners and goals. Files are kept in `engine/assets/practice_meshes`.
+The viewer draws a simplified field; it is not a collision-mesh inspection tool.
+
+**Accurate Arena** uses meshes dumped from your own installation with
+[RLArenaCollisionDumper](https://github.com/ZealanL/RLArenaCollisionDumper). Select Accurate
+Arena and enter the folder containing `soccar/*.cmf`. Keep accurate meshes separate from
+practice meshes. No dumped geometry is redistributed or uploaded.
+
+## Standalone engine
+
+Run from the repository/portable folder root:
 
 ```powershell
-pwsh -File tools/check-env.ps1
+engine/build/bin/rl-engine.exe train --config configs/presets/1v1-basics.json
+engine/build/bin/rl-engine.exe train --config configs/presets/smoke.json
+engine/build/bin/rl-engine.exe train --config configs/presets/1v1-basics.json --checkpoint runs/<run>/checkpoints/<iteration>
+engine/build/bin/rl-engine.exe play --checkpoint runs/<run>/checkpoints/<iteration>
+engine/build/bin/rl-engine.exe eval --a <checkpoint-directory> --b <checkpoint-directory> --matches 20
+engine/build/bin/rl-engine.exe bench
 ```
 
-Every line is either OK, a warning about an optional feature, or a failure with the exact command
-that fixes it.
+`--run <new-directory>` selects a training destination. Existing run directories are
+never overwritten. `--interactive` accepts JSON controls on stdin; events are JSON lines
+on stdout and diagnostics go to stderr. See [IPC protocol](docs/internal/IPC_PROTOCOL.md).
+The desktop app supervises these pipes through Tauri rather than exposing a local server.
+The vendored RLViser schemas remain available for future integration; external RLViser
+streaming is not included in this release.
 
-### About the arena
+## Development and checks
 
-RocketSim needs Rocket League's arena geometry to simulate collisions accurately. That geometry is
-part of the game and cannot be redistributed, so RL Studio gives you two options.
-
-**Practice Arena.** Works immediately, no setup. RL Studio generates a simplified arena from
-published field dimensions: a floor, a ceiling, four walls and goal openings. Physics, boost, goals
-and demolitions all work. It is close enough that everything you learn about reinforcement learning
-transfers, and it is what the onboarding wizard starts you on.
-
-**Accurate Arena.** Matches the real game, including the curved walls and corner ramps that shape
-real Rocket League play. You dump it once from your own installation:
-
-1. Start Rocket League and sit at the main menu.
-2. Run [RLArenaCollisionDumper](https://github.com/ZealanL/RLArenaCollisionDumper).
-3. Copy its `collision-meshes` output into `engine/assets/collision_meshes`.
-
-The app's onboarding wizard walks through this with screenshots. Nothing you dump is ever uploaded
-or committed.
-
-## Using the engine on its own
-
-```bash
-rl-engine train --config configs/presets/1v1-basics.json
-rl-engine play --checkpoint runs/<run-id>/checkpoints/<step>
-rl-engine eval --a <checkpointA> --b <checkpointB> --matches 20
-rl-engine bench
+```powershell
+pwsh -File tools/build.ps1 -Test
+python tools/test-engine.py
+npm --prefix app run check
+cargo test --manifest-path app/src-tauri/Cargo.toml
+pwsh -File tools/package.ps1
 ```
 
-`bench` is worth running first. It reports how many physics ticks and agent steps per second your
-machine sustains, which tells you what settings are realistic.
+The UI browser preview is `npm --prefix app run dev`. Native operations are explicitly
+disabled there. Browser regression instructions are in `tools/test-ui.md`.
 
-## Documentation
+## Layout
 
-The `docs/` folder is written to be read start to finish, and the same pages are browsable inside
-the app with every setting linking to its own explanation.
+| Directory | Purpose |
+| --- | --- |
+| `engine/src/sim` | Practice geometry and RocketSim snapshot adapter |
+| `engine/src/env` | Actions, observations and reward calculation |
+| `engine/src/ppo` | Advantage calculation |
+| `engine/src/learner` | Configuration, PPO trainer, checkpoints, playback/evaluation |
+| `engine/src/cli` | Command-line parser and control inbox |
+| `app` | Svelte frontend and Rust process supervisor |
+| `configs/schema` | Authoritative configuration schema |
+| `configs/presets` | Baseline and short validation run |
+| `docs` | Handbook, references and implementation notes |
+| `runs` | Local metrics and models; not committed |
 
-- `docs/getting-started.md` — first run, start to finish
-- `docs/how-it-works.md` — what actually happens during training
-- `docs/concepts/` — the reinforcement learning ideas: policies and value functions, PPO, GAE,
-  entropy, reward shaping, self-play, and what each training graph is telling you
-- `docs/settings-reference.md` — every configuration field and what changing it does
-- `docs/rewards-reference.md` — every reward term and the behavior it encourages
-- `docs/troubleshooting.md` — when something will not build or the bot will not learn
+## Credits
 
-## Repository layout
-
-```
-engine/     C++ training engine
-  src/
-    sim/        arena pool, game state snapshots, threading
-    env/        observations, rewards, actions, episode resets, termination
-    ppo/        networks, rollout buffer, GAE, the PPO update
-    learner/    the training loop, checkpoints, metrics, skill rating
-    ipc/        WebSocket server, RLViser streaming
-    cli/        command-line entry point
-  tests/      unit tests
-app/        Tauri desktop app (Rust backend, Svelte frontend)
-configs/
-  schema/     JSON Schema for run configuration, the single source of truth
-  presets/    ready-made configurations to start from
-docs/       documentation, including the in-app pages
-tools/      setup, build and diagnostic scripts
-runs/       your training runs (not committed)
-```
-
-## Credits and licensing
-
-RL Studio is MIT licensed.
-
-It is built on [RocketSim](https://github.com/ZealanL/RocketSim) by ZealanL, an MIT-licensed
-reimplementation of Rocket League's physics, and optionally uses
-[RLViser](https://github.com/VirxEC/rlviser) by VirxEC for high-fidelity visualization.
-The observation, action and reward designs follow conventions established by the
-[RLGym](https://rlgym.org) community.
-
-RL Studio is not affiliated with, endorsed by, or connected to Psyonix or Rocket League.
+MIT licensed. Built with RocketSim (ZealanL), PyTorch, Catch2, nlohmann/json,
+FlatBuffers, Tauri, Svelte, Three.js, uPlot, marked and DOMPurify. See
+[Third-party notices](THIRD_PARTY.md). No unlicensed reference-bot source was copied.
+RL Studio is not affiliated with Psyonix or Rocket League.

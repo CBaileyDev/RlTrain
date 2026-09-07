@@ -1,8 +1,8 @@
-import { mount } from "svelte";
-import App from "./App.svelte";
-import "./app.css";
+import { mount } from 'svelte';
+import App from './App.svelte';
+import './app.css';
 
-const target = document.getElementById("app");
+const target = document.getElementById('app');
 if (!target) {
   // index.html is ours, so this can only happen if the shell was edited badly. Failing
   // loudly here is far easier to debug than a silently blank window.
@@ -23,7 +23,7 @@ const app = mount(App, { target });
  * static import would pull the module in and throw at load time.
  */
 async function revealWindow(): Promise<void> {
-  if (!("__TAURI_INTERNALS__" in window)) return;
+  if (!('__TAURI_INTERNALS__' in window)) return;
 
   // One rAF schedules us for the next frame; the second fires after that frame has been
   // committed. Showing the window inside the first would still race the paint.
@@ -32,12 +32,12 @@ async function revealWindow(): Promise<void> {
   );
 
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
     await getCurrentWindow().show();
   } catch (error) {
     // A window we cannot show is a window the user can never close, so this failure must
     // never be swallowed silently. A later phase routes this into the error surface.
-    console.error("RL Studio: failed to reveal the main window", error);
+    console.error('RL Studio: failed to reveal the main window', error);
   }
 }
 

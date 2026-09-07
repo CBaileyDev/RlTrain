@@ -10,7 +10,7 @@ When you press **Train** and the first point appears on the graph, between fifty
 
 Every other page in `docs/concepts/` explains one part of the machine. [What the bot sees](./observations.md) explains the input. [What the bot can do](./actions.md) explains the output. [Designing the reward](./rewards.md) explains the score. [PPO](./ppo.md) explains how the weights change. [GAE](./gae.md) explains how the advantages are estimated. None of those pages tell you the order the parts run in. That order is what this page is for. After it you should be able to point at any phase and name the page that owns it.
 
-This page is about the algorithm's loop. The separate question of *which process runs what* — the `rl-engine` process, the desktop app, and the WebSocket between them — is a different subject with its own page, which is not written yet.
+This page is about the algorithm's loop. The separate question of *which process runs what* — the `rl-engine` process, the desktop app, and the redirected JSON pipes between them — is covered in [How it works](../how-it-works.md).
 
 ## The five phases
 

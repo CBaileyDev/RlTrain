@@ -41,6 +41,12 @@ option(RLS_ENABLE_RLVISER "Build RLViser UDP streaming support" ON)
 # -----------------------------------------------------------------------------
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
+FetchContent_Declare(nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.12.0
+    GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(nlohmann_json)
+find_package(OpenMP REQUIRED)
 
 # --- libtorch (PyTorch C++) --------------------------------------------------
 # Downloaded by tools/setup.ps1 into engine/libtorch.
@@ -149,13 +155,19 @@ if(NOT RLS_CORE_SOURCES)
 endif()
 
 add_library(rlstudio_core STATIC ${RLS_CORE_SOURCES} ${RLS_CORE_HEADERS})
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../configs/schema/run.schema.json")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../configs/schema/run.schema.json" RLS_CONFIG_SCHEMA)
+file(WRITE "${CMAKE_BINARY_DIR}/generated/ConfigSchema.h" "#pragma once\nnamespace rls { inline constexpr char kConfigSchema[] = R\"schema(${RLS_CONFIG_SCHEMA})schema\"; }\n")
 
 target_include_directories(rlstudio_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_BINARY_DIR}/generated"
 )
 
 target_link_libraries(rlstudio_core PUBLIC
     RocketSim
+    nlohmann_json::nlohmann_json
+    OpenMP::OpenMP_CXX
     "${TORCH_LIBRARIES}"
 )
 

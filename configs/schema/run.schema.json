@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RL Studio run configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "default": "First touch",
+      "description": "Name shown in the run library."
+    },
+    "arena": {
+      "type": "string",
+      "default": "practice",
+      "description": "Practice uses generated geometry; accurate needs dumped meshes.",
+      "enum": [
+        "practice",
+        "accurate"
+      ]
+    },
+    "meshPath": {
+      "type": "string",
+      "default": "engine/assets/collision_meshes",
+      "description": "Directory containing accurate soccar meshes."
+    },
+    "device": {
+      "type": "string",
+      "default": "auto",
+      "description": "Auto selects CUDA when available.",
+      "enum": [
+        "auto",
+        "cpu",
+        "cuda"
+      ]
+    },
+    "observation": {
+      "type": "string",
+      "default": "advanced_v1",
+      "description": "Advanced includes opponents and boost pads; basic only sees self and ball.",
+      "enum": [
+        "advanced_v1",
+        "basic_v1"
+      ]
+    },
+    "teamSize": {
+      "type": "integer",
+      "default": 1,
+      "description": "Cars per team.",
+      "minimum": 1,
+      "maximum": 4
+    },
+    "arenas": {
+      "type": "integer",
+      "default": 32,
+      "description": "Parallel simulated matches.",
+      "minimum": 1,
+      "maximum": 1024
+    },
+    "threads": {
+      "type": "integer",
+      "default": 8,
+      "description": "CPU workers stepping arenas.",
+      "minimum": 1,
+      "maximum": 32
+    },
+    "tickSkip": {
+      "type": "integer",
+      "default": 8,
+      "description": "Physics ticks per action at 120 Hz.",
+      "minimum": 1,
+      "maximum": 32
+    },
+    "actionDelayTicks": {
+      "type": "integer",
+      "default": 7,
+      "description": "Ticks using the previous action before applying a new action.",
+      "minimum": 0,
+      "maximum": 31
+    },
+    "rolloutSteps": {
+      "type": "integer",
+      "default": 128,
+      "description": "Decisions per arena before each PPO update.",
+      "minimum": 8,
+      "maximum": 4096
+    },
+    "iterations": {
+      "type": "integer",
+      "default": 100,
+      "description": "PPO updates to run. Set the friendlier agent-step target at the top of Train.",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "epochs": {
+      "type": "integer",
+      "default": 4,
+      "description": "Passes over each rollout.",
+      "minimum": 1,
+      "maximum": 32
+    },
+    "minibatchSize": {
+      "type": "integer",
+      "default": 1024,
+      "description": "Samples per optimizer update.",
+      "minimum": 8,
+      "maximum": 65536
+    },
+    "hiddenSize": {
+      "type": "integer",
+      "default": 256,
+      "description": "Width of two neural network layers.",
+      "minimum": 32,
+      "maximum": 1024
+    },
+    "seed": {
+      "type": "integer",
+      "default": 42,
+      "description": "Random seed for policy and arena resets.",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "checkpointEvery": {
+      "type": "integer",
+      "default": 10,
+      "description": "Save a model every this many iterations.",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "learningRate": {
+      "type": "number",
+      "default": 0.00015,
+      "description": "Adam learning rate.",
+      "minimum": 1e-07,
+      "maximum": 0.01
+    },
+    "gamma": {
+      "type": "number",
+      "default": 0.99,
+      "description": "Discount applied per decision.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "gaeLambda": {
+      "type": "number",
+      "default": 0.95,
+      "description": "GAE bias versus variance tradeoff.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "clipRange": {
+      "type": "number",
+      "default": 0.2,
+      "description": "Maximum policy ratio movement before clipping.",
+      "minimum": 0.01,
+      "maximum": 0.5
+    },
+    "entropyCoef": {
+      "type": "number",
+      "default": 0.03,
+      "description": "Bonus for exploring actions.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "valueCoef": {
+      "type": "number",
+      "default": 0.5,
+      "description": "Weight of value prediction error.",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "maxGradNorm": {
+      "type": "number",
+      "default": 0.5,
+      "description": "Gradient norm limit.",
+      "minimum": 0.01,
+      "maximum": 10
+    },
+    "episodeSeconds": {
+      "type": "number",
+      "default": 60,
+      "description": "Time-limit truncation; bootstraps the final value.",
+      "minimum": 1,
+      "maximum": 600
+    },
+    "noTouchSeconds": {
+      "type": "number",
+      "default": 30,
+      "description": "Reset after this long without a touch.",
+      "minimum": 1,
+      "maximum": 600
+    },
+    "velocityToBall": {
+      "type": "number",
+      "default": 4,
+      "description": "Dense reward per second for moving toward the ball.",
+      "minimum": -200,
+      "maximum": 200
+    },
+    "faceBall": {
+      "type": "number",
+      "default": 0.25,
+      "description": "Dense reward per second for facing the ball.",
+      "minimum": -200,
+      "maximum": 200
+    },
+    "ballToGoal": {
+      "type": "number",
+      "default": 2,
+      "description": "Signed ball velocity toward the opponent goal.",
+      "minimum": -200,
+      "maximum": 200
+    },
+    "saveBoost": {
+      "type": "number",
+      "default": 0.2,
+      "description": "Dense reward per second for retaining boost.",
+      "minimum": -200,
+      "maximum": 200
+    },
+    "airTime": {
+      "type": "number",
+      "default": 0,
+      "description": "Dense reward per second while airborne.",
+      "minimum": -200,
+      "maximum": 200
+    },
+    "touch": {
+      "type": "number",
+      "default": 5,
+      "description": "Reward on a ball touch.",
+      "minimum": -200,
+      "maximum": 200
+    },
+    "boostPickup": {
+      "type": "number",
+      "default": 10,
+      "description": "Reward per full boost tank collected.",
+      "minimum": -200,
+      "maximum": 200
+    },
+    "goal": {
+      "type": "number",
+      "default": 150,
+      "description": "Reward for scoring, negative for conceding.",
+      "minimum": -1000,
+      "maximum": 1000
+    }
+  }
+}

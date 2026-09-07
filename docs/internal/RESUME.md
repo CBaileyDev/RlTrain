@@ -1,67 +1,56 @@
-# Where to pick up
+# Development status
 
-Paused 2026-09-07 at the user's request, mid-way through generating the contract layer.
+The local RL Studio v0.1 workbench is implemented. The portable output is
+`artifacts/RLStudio/rl-studio.exe`; build it with `tools/package.ps1`.
 
-## State
+## Implemented
 
-Committed and working:
+- RocketSim adapter, generated Practice Arena and 1v1 through 4v4 environments.
+- 90 discrete actions; basic and advanced observations; time-aware reward terms.
+- CPU/CUDA PPO, GAE, OpenMP stepping, checkpoint/Adam persistence and resume.
+- Goal termination versus time-limit truncation, with endpoint value bootstrapping.
+- Pause, resume, reward acknowledgements, graceful stop and window-close supervision.
+- Standalone train/play/eval/bench commands and JSON-line control/event protocol.
+- Tauri native process bridge, Svelte workbench, Three.js match view, uPlot metrics.
+- Config import/export/persistence, three themes, onboarding, run library and comparisons.
+- Optional OpenAI proposal assistant with OS credential storage and offline diagnostics.
+- In-app handbook, current schema-backed references, build/start/package/test scripts.
 
-- Build toolchain. `pwsh -File tools/build.ps1` configures and builds RocketSim, libtorch with
-  CUDA 13, Catch2 and FlatBuffers. Verified.
-- `tools/check-env.ps1` reports every prerequisite. Everything passes on this machine except the
-  collision meshes, which are optional now that the Practice Arena exists.
-- Practice Arena generator and its tests, in `engine/src/sim/PracticeArena.*` and
-  `engine/tests/TestPracticeArena.cpp`. Not yet compiled, because the contract layer it will sit
-  alongside is incomplete.
-- 11 concept documentation pages, plus getting-started and troubleshooting.
-- Tauri app scaffold: builds, but has no design system or UI yet.
+## Validation
 
-Uncommitted and INCOMPLETE. Three of roughly fifteen contract files were written before the pause:
+- Release C++ build: 18 Catch2 tests pass.
+- `python -X utf8 tools/test-engine.py --cuda`: CPU and CUDA optimization, changed model
+  archives, finite metrics, resume, evaluation, GPU checkpoint playback on CPU,
+  GPU-to-CPU resumed training, invalid arguments, pause/reward/resume/stop all pass.
+- A normal 32-arena CUDA configuration ran 8 updates / 65,536 agent steps with
+  finite metrics. After warmup, measured throughput was roughly 31k–42k agent steps/s
+  on this machine. This is a pipeline/performance check, not evidence of strong play.
+- `npm --prefix app run check`: zero errors and zero warnings.
+- `cargo test --manifest-path app/src-tauri/Cargo.toml`: native schema validation passes.
+- Browser regression script passes navigation, editing, diagnostic labeling, Markdown,
+  theme persistence, empty/playback states and 1100×700 layout.
+- Optimized Windows desktop binary builds with an embedded frontend.
 
-```
-engine/src/util/Common.h      287 lines
-engine/src/sim/GameState.h    761 lines
-engine/src/env/ObsBuilder.h   393 lines
-```
+## Known scope and validation limits
 
-They have not been compiled or reviewed. Treat them as a draft.
+No pretrained competitive policy is supplied. Strong play requires substantial training
+and independent evaluation. Historical opponent pools, skill ratings, external RLViser
+streaming and exact RNG/physics checkpoint continuation are not implemented.
+The existing concept essays discuss some broader ideas; current behavior is documented
+in how-it-works.md and the settings/rewards references.
 
-## Resuming
+The AI network request requires the user's API key/model and has not been exercised with
+a live paid account. It validates returned numeric proposals before user review.
+Native WebView end-to-end automation was blocked by automatic approval review when
+launching with a remote debugging port; browser checks and direct engine checks are
+separate evidence and must not be described as a native UI end-to-end test.
 
-Three workflows were stopped mid-run. Each can resume from cache, so completed agents replay
-instantly and only unfinished work re-runs.
+## Architecture decisions superseding older notes
 
-```
-Workflow({scriptPath: "<session>/workflows/scripts/rlstudio-foundation-contracts-wf_0acf2ce7-7fb.js",
-          resumeFromRunId: "wf_0acf2ce7-7fb"})
-```
-Writes the remaining contract files, then runs four adversarial critics over the whole set.
-Design and judging are already cached; the winning direction was EXTENSIBILITY, with 48 grafted
-improvements from the other two designs.
+The app uses supervised JSON lines over redirected process pipes, not the planned
+WebSocket. Practice geometry uses a separate practice_meshes directory, avoiding
+collision overlap with accurate meshes. Rust is now installed. Never re-run the old
+cached workflow references from the original paused session; those were not used here.
 
-```
-Workflow({scriptPath: "<session>/workflows/scripts/rlstudio-app-shell-wf_34f9bd8c-308.js",
-          resumeFromRunId: "wf_34f9bd8c-308"})
-```
-Picks a visual direction, then builds the design tokens, theme system, frameless window chrome,
-navigation and error handling. The scaffold step is cached.
-
-```
-Workflow({scriptPath: "<session>/workflows/scripts/rlstudio-concept-docs-wf_a27bf219-176.js",
-          resumeFromRunId: "wf_a27bf219-176"})
-```
-Only the index page and the cross-link and contradiction pass remain.
-
-## After the contracts land
-
-1. Build and fix compile errors across the contract headers plus PracticeArena.
-2. Run the Practice Arena tests. They have never been executed.
-3. Implement the engine: arena pool and threading, the built-in observation, reward, action,
-   state-setter and terminal components, then the PPO learner, then the WebSocket server.
-4. Wire the app to the engine over the protocol in `docs/internal/IPC_PROTOCOL.md` once it exists.
-
-## Read first
-
-`docs/internal/GROUNDING.md` holds every verified fact: the RocketSim API surface, pinned versions,
-the RLViser wire format, and the three toolchain incompatibilities that took real debugging to find.
-Do not re-derive them.
+Retain the CUDA/MSVC toolchain fixes in GROUNDING.md. Always build the engine through
+tools/build.ps1, with the CUDA-compatible MSVC 14.4x toolset.

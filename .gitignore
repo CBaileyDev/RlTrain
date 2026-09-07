@@ -17,6 +17,7 @@ engine/schemas/generated/
 engine/assets/collision_meshes/
 collision-meshes/
 engine/assets/rlviser/
+engine/assets/practice_meshes/
 
 # Runs and logs
 runs/
@@ -45,3 +46,7 @@ Thumbs.db
 .env.*
 !.env.example
 secrets.json
+
+# Local QA and portable outputs
+.playwright-cli/
+artifacts/

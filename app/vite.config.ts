@@ -1,10 +1,10 @@
-import { defineConfig } from "vite";
-import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { defineConfig } from 'vite';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
 
 // Tauri sets this when you run `tauri dev --host` to develop against another machine on
 // the LAN. It is absent for the normal desktop flow, which is what we care about.
-const host = process.env["TAURI_DEV_HOST"];
-const isDebugBuild = Boolean(process.env["TAURI_ENV_DEBUG"]);
+const host = process.env['TAURI_DEV_HOST'];
+const isDebugBuild = Boolean(process.env['TAURI_ENV_DEBUG']);
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -23,19 +23,23 @@ export default defineConfig({
     // Spread rather than `hmr: host ? {...} : undefined` because tsconfig sets
     // exactOptionalPropertyTypes, under which an explicit `undefined` is not the same
     // as an absent key.
-    ...(host ? { hmr: { protocol: "ws" as const, host, port: 1421 } } : {}),
+    ...(host ? { hmr: { protocol: 'ws' as const, host, port: 1421 } } : {}),
     watch: {
+      awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
       // src-tauri/target churns thousands of files during a cargo build. Watching it
       // pins a CPU core and triggers pointless frontend reloads.
-      ignored: ["**/src-tauri/**"],
+      ignored: ['**/src-tauri/**'],
     },
   },
 
   build: {
     // The frontend only ever runs inside WebView2 (Chromium), so target it directly:
     // no legacy transpilation and no polyfills we would never use.
-    target: "chrome120",
-    minify: isDebugBuild ? false : "esbuild",
+    target: 'chrome120',
+    minify: isDebugBuild ? false : 'esbuild',
     sourcemap: isDebugBuild,
+    rollupOptions: {
+      output: { manualChunks: { three: ['three'], charts: ['uplot'] } },
+    },
   },
 });
