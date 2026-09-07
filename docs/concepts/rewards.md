@@ -4,7 +4,9 @@
 
 ## Why this matters
 
-Everything else in RL Studio is machinery. The observation builder decides what the bot can see, the action table decides what it can do, PPO decides how the weights move. None of them decide what the bot *tries to do*. The reward does, alone. Get the architecture slightly wrong and training is slower; get the reward slightly wrong and you train a bot that is excellent at something you never wanted.
+Everything else in RL Studio is machinery. The [observation builder](./observations.md) decides what the bot can see, the [action table](./actions.md) decides what it can do, [PPO](./ppo.md) — the learning algorithm — decides how the weights move. None of them decide what the bot *tries to do*. The reward does, alone. Get the architecture slightly wrong and training is slower; get the reward slightly wrong and you train a bot that is excellent at something you never wanted.
+
+This page assumes the loop from [What Reinforcement Learning Is](./what-is-rl.md) — observation, action, reward, episode.
 
 ## Start from the honest reward
 
@@ -12,11 +14,13 @@ The reward you actually want is short: `+1` when your team scores, `-1` when the
 
 This is a **sparse** reward — zero almost everywhere, non-zero at rare moments. It is also the *correct* reward. A bot that maximises it wins games, and there is no way to exploit it.
 
-It also almost never works from a fresh start. A randomly initialised policy samples roughly uniformly from the 90 discrete actions ([What the Bot Can Do](./actions.md)) fifteen times a second. It drives in circles, jumps at nothing, boosts into the corner. It does not score, and it can run for hours of simulated time without scoring.
+It also almost never works from a fresh start. A randomly initialised policy samples roughly uniformly from the 90 discrete actions ([What the Bot Can Do](./actions.md)) fifteen times a second — the bot decides once every 8 physics ticks, and the simulator runs at 120 Hz. It drives in circles, jumps at nothing, boosts into the corner. It does not score, and it can run for hours of simulated time without scoring.
 
-Now look at what PPO receives. Every reward is zero, so the value network correctly predicts zero everywhere, so every advantage is zero, so the gradient is zero. Nothing pushes the policy, so it still does not score. The loop is closed.
+Now look at what PPO receives. Every reward is zero, so the value network quickly learns to predict zero everywhere, so the advantages collapse to noise centred on zero. Averaged over a batch, the policy-gradient term comes out to nothing.
 
-Even a lucky goal barely helps. That episode was maybe 450 decisions long and one scalar arrived at the end of it. Discounting gives a partial answer about which decisions mattered ([Policies, Values and Advantage](./policy-and-value.md)), but one `+1` against thousands of empty episodes is a very quiet signal.
+The weights do still move, and that makes it worse rather than neutral. The entropy bonus contributes a gradient on every single step regardless of reward, and it pushes the policy toward *more* randomness ([Exploration and Entropy](./exploration.md)). So the one force still acting makes the bot less decisive, and nothing in the update carries any information about scoring. The loop is closed.
+
+Even a lucky goal barely helps. An episode capped at 30 seconds by `env.max_episode_seconds` is about 450 decisions at 15 a second, and one scalar arrived at the end of all of them. Discounting gives a partial answer about which decisions mattered ([Policies, Values and Advantage](./policy-and-value.md)), but one `+1` against thousands of empty episodes is a very quiet signal.
 
 ## Shaped rewards: a ladder to climb
 

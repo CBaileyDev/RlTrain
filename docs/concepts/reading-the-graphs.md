@@ -169,10 +169,14 @@ policy drifts less per iteration.
 
 **What it is.** The fraction of samples in the batch whose probability ratio hit the clip boundary.
 **Healthy.** Roughly 0.05 to 0.25.
-**Unhealthy.** Above 0.4 — most of the batch is clipped, so most of your gradient is being thrown
-away. Near 0.0 — the updates are too timid to matter.
-**First thing to change.** High: lower [`ppo.clip_range`](../settings-reference.md) or the learning
-rate. Near zero: raise the learning rate or `ppo.epochs`.
+**Unhealthy.** Far above roughly 0.3 — most of the batch is clipped, so most of your gradient is
+being thrown away. Near 0.0 — the updates may be too timid to matter.
+**First thing to change.** High: lower [`ppo.epochs`](../settings-reference.md), then
+[`ppo.learning_rate`](../settings-reference.md). Do **not** lower `ppo.clip_range` to bring this
+number down — a narrower band leaves more samples outside it, so Clip Fraction goes *up* even though
+each update gets safer. [ppo.md](./ppo.md) works through why. Near zero: check Episode Reward Mean
+first. If it is flat, raise the learning rate or `ppo.epochs`. If it is still climbing, the run is
+simply being conservative and needs nothing.
 
 ### Advantage Mean and Standard Deviation (after normalization)
 

@@ -14,7 +14,7 @@ Suppose your reward config has `VelocityPlayerToBall` at weight 4.0. Early in tr
 
 Now consider the aerial. A well-timed aerial touch scores far more than ball-chasing ever will: it earns the touch reward, it earns `VelocityBallToGoal`, and eventually it earns goals. But the first hundred aerial attempts are terrible. The bot jumps, pitches back, drifts, misses the ball entirely, lands upside down, and loses the ground-level `VelocityPlayerToBall` reward it would have collected by just driving. Every one of those attempts looks, to the optimizer, like a mistake.
 
-That is **exploration** — taking an action that looks worse right now because you do not yet know how good it can get. If nothing pushes the policy to keep trying, the maths of policy gradient will do exactly what you told it to: it will make jumping less likely after every failed attempt until the bot never leaves the ground again. It will have found a local optimum — a decent ball-chaser — and it will sit in it for the rest of the run.
+That is **exploration** — taking an action that looks worse right now because you do not yet know how good it can get. If nothing pushes the policy to keep trying, the training update will do exactly what you told it to: it will make jumping less likely after every failed attempt until the bot never leaves the ground again. It will have found a local optimum — a decent ball-chaser — and it will sit in it for the rest of the run.
 
 Exploration is not a bug you tolerate. It is a resource you spend on purpose.
 
@@ -31,7 +31,7 @@ Naming every symbol:
 - `H` is the entropy, measured in **nats** because we use the natural logarithm. Multiply by `1/ln 2 ≈ 1.4427` if you want bits instead.
 - `p_i` is the probability the policy assigns to action `i` for one specific observation.
 - `i` runs over all 90 actions in the table, and the sum covers all of them.
-- The minus sign is there because `ln p_i` is negative for any probability below 1, so without it `H` would always be negative.
+- The minus sign is there because `ln p_i` is negative for any probability below 1, so without it the sum could never be positive. Flipping the sign makes `H` come out as zero or greater, which is what you want from a measure of how spread out something is.
 - By convention, a term with `p_i = 0` contributes 0, not an error. (`p ln p` goes to 0 as `p` goes to 0.)
 
 Two anchors give you the whole scale:
@@ -42,7 +42,7 @@ Two anchors give you the whole scale:
 H = -\sum_{i=1}^{90} \tfrac{1}{90} \ln \tfrac{1}{90} = -90 \cdot \tfrac{1}{90} \ln \tfrac{1}{90} = -\ln \tfrac{1}{90} = \ln 90 \approx 4.4998 \text{ nats}
 ```
 
-All 90 terms are identical, so they collapse into one, and `−ln(1/90)` is `ln 90` because flipping the inside of a log flips its sign.
+All 90 terms are identical, so they collapse into one, and `−ln(1/90)` is `ln 90` because taking the reciprocal of a log's argument negates it: `ln(1/x) = −ln(x)`.
 
 This is a freshly initialised network. It has no opinion about anything.
 
@@ -61,9 +61,9 @@ H = -(-0.77394)                            =  0.774 nats
 
 0.774 nats is low. This policy is nearly committed.
 
-A useful way to read any entropy value: compute `e^H`, the **perplexity**, which is roughly the effective number of actions the policy is still choosing between. `e^4.50 = 90` (all of them). `e^2.0 ≈ 7.4` (about seven live options). `e^0.774 ≈ 2.2` (barely two). Mid-training, an effective 5 to 15 actions is a comfortable place to be.
+A useful way to read any entropy value: compute `e^H`, the **perplexity**, which is roughly the effective number of actions the policy is still choosing between. `e^4.50 = 90` (all of them). `e^2.0 ≈ 7.4` (about seven live options). `e^0.774 ≈ 2.2` (barely two). Mid-training, an effective 4.5 to 20 actions is a comfortable place to be — which, running the conversion backwards, is exactly the 1.5 to 3.0 nat band you will see quoted for a healthy Entropy panel later on this page.
 
-RL Studio's Entropy panel plots the mean of `H` across every observation in the rollout, so one dot on that graph is the average indecision of the policy over tens of thousands of game states.
+RL Studio's Entropy panel plots the mean of `H` across every observation in the *rollout* — one rollout being the batch of experience the bot collects with frozen weights before each update, 50,000 to 100,000 steps in this project ([the training loop](./training-loop.md) walks through it). So one dot on that graph is the average indecision of the policy over tens of thousands of game states.
 
 ## How the entropy bonus enters training
 
@@ -72,12 +72,20 @@ You do not get exploration by adding a separate "explore now" module. You get it
 RL Studio's total PPO loss subtracts `ppo.entropy_coef` times the mean entropy. Schematically:
 
 ```
-loss = policy_loss  +  ppo.vf_coef * value_loss  -  ppo.entropy_coef * H
+loss = policy_loss  +  ppo.value_coef * value_loss  -  ppo.entropy_coef * H_mean
 ```
 
-The full policy and value terms are derived in [ppo.md](./ppo.md); the only part that concerns us here is the minus sign in front of the entropy term. The optimizer minimises loss. Subtracting `H` means that raising entropy lowers loss. So the optimizer is being paid, every single gradient step, to keep the action distribution spread out.
+Naming every term:
 
-Think of it as a standing bribe against premature certainty. It does not tell the bot what to try. It just makes becoming certain slightly expensive, so the policy only commits when the advantage estimates are strong enough to be worth the fee.
+- `policy_loss` is the part that pushes the probability of good actions up and bad actions down. It is the whole subject of [ppo.md](./ppo.md); treat it as a black box here.
+- `value_loss` is how badly the value network mispredicted how good each situation was. Also [ppo.md](./ppo.md).
+- `ppo.value_coef` is how much the value error counts relative to the policy error. Not our concern on this page.
+- `ppo.entropy_coef` is the setting this page is about: how much you pay the policy to stay undecided.
+- `H_mean` is the *mean* entropy across every observation in the batch, not the entropy at one observation.
+
+The only part that concerns us here is the minus sign in front of the entropy term. The optimizer minimises loss. Subtracting `H_mean` means that raising entropy lowers loss. So the optimizer is being paid, every single gradient step, to keep the action distribution spread out.
+
+Think of it as a standing bribe against premature certainty. It does not tell the bot what to try. It just makes becoming certain slightly expensive, so the policy only commits when the [advantage estimates](./policy-and-value.md) — how much better an action was than what this bot usually does in that situation — are strong enough to be worth the fee.
 
 ## Choosing `ppo.entropy_coef`
 
@@ -96,9 +104,9 @@ Change it by factors of about three, not by 10%. The difference between 0.03 and
 Causes, in rough order of how often they are actually the culprit:
 
 1. **`ppo.entropy_coef` is too low** for this reward config. The bribe is not covering the cost of staying open-minded.
-2. **`ppo.learning_rate` is too high.** Each update moves the probabilities much further than intended, so the policy sprints to certainty before the advantage estimates are trustworthy. Around `1.5e-4` is the reference point for this project.
-3. **A reward term with a large weight that pays immediately.** A big touch reward is the classic one: `StrongTouch` at 60 hands out an enormous, unambiguous, instantly-attributable payout for one specific behaviour, and the policy will collapse onto it. Reward design lives in [rewards.md](./rewards.md), but recognise the fingerprint here.
-4. **Too many PPO epochs per rollout.** `ppo.epochs` set high means the same batch of experience is re-used many times, and each pass pushes the same direction. The clipping in PPO limits this, but does not eliminate it.
+2. **`ppo.learning_rate` is too high.** Each update moves the probabilities much further than intended, so the policy sprints to certainty before the [advantage estimates](./policy-and-value.md) are trustworthy. Around `1.5e-4` is the reference point for this project.
+3. **A reward term that dominates the others and pays immediately.** A big touch reward is the classic one: `StrongTouch` at 60 pays out densely, unambiguously, and for one specific behaviour. Note that the raw number 60 is not the problem on its own. `ppo.normalize_advantages` is on by default and rescales each batch of advantages to mean 0 and standard deviation 1, so scaling every reward weight together changes almost nothing ([gae.md](./gae.md)). What matters is 60 *relative to the other terms in your config* — a term that dominates the ranking inside the batch, and that pays instantly enough to be easy to attribute, is the one the policy collapses onto. Reward design lives in [rewards.md](./rewards.md), but recognise the fingerprint here.
+4. **Too many PPO epochs per rollout.** `ppo.epochs` is how many times PPO re-uses one batch of experience, and each pass pushes the same direction. The reference value for this project is `2`; at 8 or 10 the policy can sprint to certainty inside a single update. PPO's clipping — a brake on how far one update can move the policy, covered in [ppo.md](./ppo.md) — limits this, but does not eliminate it.
 
 **The symptom in the viewer** is unmistakable once you know it: the bot repeats one behaviour regardless of the situation. It jumps at the ball whether the ball is on the ground, in the air, or behind it. It boosts straight forward off kickoff even when it has already lost the kickoff. The situation changes; the output does not.
 
@@ -107,9 +115,9 @@ Causes, in rough order of how often they are actually the culprit:
 1. Raise `ppo.entropy_coef` (0.03 to 0.1) and restart from a checkpoint taken before the collapse.
 2. Halve `ppo.learning_rate`.
 3. Look for a reward weight that pays too much, too immediately, and cut it.
-4. Reduce `ppo.epochs`.
+4. Reduce `ppo.epochs` — but only if you raised it above the reference value of 2. If you are already at 2, the only move left is 1, and that halves how much learning you get out of each rollout. Try the other three first.
 
-A collapsed policy does not recover on its own. Once probabilities reach effectively zero, the actions stop being sampled, so they stop generating experience, so they never get credit. Restart from an earlier checkpoint.
+A collapsed policy does not reliably recover on its own. The entropy term does keep pushing those near-zero probabilities back up — it is computed over all 90 actions, not just the sampled one — but that is the only pressure left. The advantage estimates cannot help, because an action that is never sampled generates no experience and so never earns credit. In practice that recovery is far slower than restarting, so restart from an earlier checkpoint rather than waiting.
 
 ## What a healthy entropy curve looks like
 
@@ -119,19 +127,21 @@ A **flat line at maximum** is also a warning, and it fools people because it loo
 
 ## Sampled actions versus deterministic actions
 
-**While training, RL Studio samples the action from the distribution.** It draws action `i` with probability `p_i`. This is not optional. The policy gradient derivation assumes the actions in the rollout were sampled from the current policy — that is what makes the log-probability term valid ([ppo.md](./ppo.md)). And the sampling *is* the exploration: without it, the entropy bonus would be pushing around a distribution that never gets acted on.
+**While training, RL Studio samples the action from the distribution.** It draws action `i` with probability `p_i`. This is not optional. The training update is built on the log-probability the policy assigned to each action it took, which RL Studio records alongside every step. That requires the action to have been drawn from a distribution whose probabilities are known. PPO then re-uses the same rollout for several epochs, by which point the policy has moved, and it corrects for that drift with the importance ratio ([ppo.md](./ppo.md) builds both pieces). None of that machinery works if the action was chosen by `argmax`, because then there is no distribution to compare against and nothing for the entropy bonus to push on. And the sampling *is* the exploration: without it, the entropy bonus would be pushing around a distribution that never gets acted on.
 
 **For evaluation, deployment and the viewer's "Best action" mode, RL Studio takes the highest-probability action instead** — `argmax` over the 90 probabilities. No dice roll. Same observation, same action, every time.
 
-Here is the consequence that surprises everyone the first time: **the same checkpoint plays noticeably better and more consistently when acting deterministically.** Under sampling, a policy sitting at entropy 2.0 is choosing among an effective seven-ish options at every decision, fifteen times a second. Most of those alternatives are fine, but a few are bad, and a bad sample at the wrong moment means a whiffed touch or an own-goal-shaped clear. Deterministic play throws all of that away and always takes the mode.
+Here is the consequence that surprises everyone the first time: **a well-trained checkpoint usually plays better and more consistently when acting deterministically.** Under sampling, a policy sitting at entropy 2.0 is choosing among an effective seven-ish options at every decision, fifteen times a second. Most of those alternatives are fine, but a few are bad, and a bad sample at the wrong moment means a whiffed touch or an own-goal-shaped clear. Deterministic play throws all of that away and always takes the mode.
+
+Two caveats. Early in training, when entropy is still high, `argmax` can be *worse* — the random draws were what kept the bot from getting stuck, and without them you will sometimes watch it drive in a circle forever. And because this project trains by [self-play](./self-play.md), a fully deterministic policy is also a predictable one, which an adapting opponent can learn to exploit. Deterministic is the right default for measuring a checkpoint. It is not automatically the stronger way to play.
 
 So the training reward curve and your evaluation scores are **not directly comparable**. The training curve is measuring a bot that is deliberately handicapping itself. Do not conclude that a checkpoint regressed because its training reward dipped below an eval score from an hour ago; they are measurements of two different policies derived from the same weights. Compare eval to eval.
 
-In RL Studio: the viewer has a **Sampled / Best action** toggle in its policy panel — flip it while watching and you will see the jitter disappear. The evaluation runner uses `eval.deterministic`, which the CLI exposes as `rl-engine eval --deterministic`, and it defaults to on so that reported scores are reproducible.
+In RL Studio: the viewer has a **Sampled / Best action** toggle in its policy panel — flip it while watching and you will see the jitter disappear. The evaluation runner uses `eval.deterministic`, which the CLI exposes as `rl-engine eval --deterministic`, and it defaults to on so that reported scores are not polluted by the policy's own dice rolls. That removes one source of variance, not all of them — the kickoffs are still randomised, and the self-play opponent varies too — so fix the evaluation's seed as well if you want two runs of the same checkpoint to land close together. Even then, expect *close*, not identical: [the training loop](./training-loop.md) explains why `run.seed` makes a run similar rather than bit-exact.
 
 ## Two misconceptions worth correcting
 
-**"Entropy going down is bad."** No. Entropy going down is the whole point — it means the policy is learning which actions are worth taking. What is bad is entropy going down *fast*, or going all the way to zero. A slow smooth decline is exactly what a healthy run looks like. A flat line at 4.5 means nothing is being learned at all, which is worse than a decline.
+**"Entropy going down is bad."** No. Entropy going down is the whole point — it means the policy is learning which actions are worth taking. What is bad is entropy going down *fast*, or going all the way to zero — the healthy-curve section above is the shape to compare against.
 
 **"More exploration is always safer."** No. A high `ppo.entropy_coef` does not merely slow learning down; it can permanently prevent the policy from committing to a good behaviour. The bot finds the aerial, gets rewarded for it, starts to favour it — and the entropy term keeps dragging the probability back toward uniform. What you see is a bot that plateaued at mediocre and never got worse or better. That failure is harder to diagnose than a collapse, because the graphs look calm.
 
