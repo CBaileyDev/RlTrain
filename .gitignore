@@ -1,0 +1,47 @@
+# Build / deps
+engine/libtorch/
+engine/build/
+engine/out/
+build/
+out/
+*.obj
+*.pdb
+*.ilk
+*.exp
+
+# Generated
+engine/src/generated/
+engine/schemas/generated/
+
+# Assets that are NOT redistributable (dumped from the user Rocket League install)
+engine/assets/collision_meshes/
+collision-meshes/
+engine/assets/rlviser/
+
+# Runs and logs
+runs/
+*.log
+
+# Node / Tauri
+node_modules/
+app/dist/
+app/src-tauri/target/
+app/.svelte-kit/
+
+# Python
+__pycache__/
+.venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vs/
+.vscode/
+!.vscode/extensions.json
+.idea/
+
+# Secrets - never commit API keys
+.env
+.env.*
+!.env.example
+secrets.json

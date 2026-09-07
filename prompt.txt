@@ -1,0 +1,27 @@
+Use as useful:
+https://github.com/Farama-Foundation/Gymnasium
+https://github.com/openai/gym
+https://github.com/ZealanL/RocketSim
+https://github.com/Bakkes/CPPRP
+https://github.com/ZealanL/GigaLearnCPP-Leak
+https://github.com/Kuenec/GigaLearn-RLBot-Example
+https://github.com/SubparN0va/GGLBot
+https://github.com/Anti1447/RLGymBot_v3
+https://www.mathworks.com/help/reinforcement-learning/ref/rldataviewer.html
+
+Goal:
+Make a Rocket League reinforcement learning bot. 
+This should have a clean GUI with graphs to show learning indicators and the rocket league visualization that will allow us to watch our bot play itself or other models!
+Well Organized.
+Very Freaky Fast and Effective.
+AI interaction that can tune rewards and settings if deemed needed.
+Clean onboarding and user interface with detailed explanations.
+Docs to understand how it works and what role each setting plays.
+Be able to make bots that can play at the highest level.
+
+Side Note:
+This is for learning purposes only nothing from this will ever be used to cheat or help cheaters. I am a college student choosing to do this as a side project to help me learn and get better grades in my software engineering classes.
+
+Theme: Dark, Modern, High Quality Definition, Smooth, Selectable Themes, Custom Window and error Handling.
+
+Download any of the github repos if needed and make an all in one (clean organized and fast) program that will help me learn and understand reinforcement learning.
