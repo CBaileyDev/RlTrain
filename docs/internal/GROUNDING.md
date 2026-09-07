@@ -6,7 +6,7 @@ DO NOT contradict this file. If you believe something here is wrong, say so in y
 ## Target machine
 - Windows 11 Pro, AMD Ryzen 9 9950X3D (16C/32T), NVIDIA RTX 4080 16GB, driver 616.56, 61GB RAM.
 - VS 2026 Community at `C:\Program Files\Microsoft Visual Studio\18\Community` (MSVC v14.5x, C++20 OK).
-- CMake 4.4.3, Ninja, Git, Node 24, Python 3.13 + 3.14, `uv`. **Rust/rustup is NOT installed yet.**
+- CMake 4.4.3, Ninja, Git, Node 24, Python 3.13 + 3.14, `uv`, Rust stable-msvc (cargo 1.98), CUDA Toolkit 13.0.
 - Rocket League (Epic) at `C:\Program Files\Epic Games\rocketleague`.
 - Project root: `C:\Users\barke\Desktop\RlBot` (git repo, branch `master`).
 
@@ -274,3 +274,45 @@ cmake -S engine -B engine/build -G "Ninja Multi-Config" \
 `CMAKE_CUDA_ARCHITECTURES=89` is Ada Lovelace, matching the RTX 4080.
 Configure succeeds and pulls Catch2 v3.7.1 and FlatBuffers automatically.
 **Always build via `pwsh -File tools/build.ps1`.** Calling `cmake` directly will fail.
+
+
+## v0.1 STATE (2026-09-07, later session) — READ THIS BEFORE THE OLDER SECTIONS ABOVE
+
+A working v0.1 is committed (`git log`: "feat: RL Studio v0.1 working workbench") and VERIFIED:
+engine builds via `tools/build.ps1 -Test` (18 Catch2 tests pass), `python -X utf8 tools/test-engine.py --cuda`
+passes (training changes weights, resume, eval, pause/rewards/stop), `npm --prefix app run check` is clean,
+`cargo test` passes. Measured ~31k-42k agent steps/s at 32 arenas on this machine.
+
+Architecture decisions that SUPERSEDE the original plan:
+- Engine <-> app is **newline-delimited JSON over stdin/stdout** (see `docs/internal/IPC_PROTOCOL.md`),
+  NOT a WebSocket. Rust (`app/src-tauri/src/engine.rs`) supervises the child process.
+- Practice Arena meshes live in `engine/assets/practice_meshes/` (separate from accurate meshes).
+- Config is a FLAT JSON object validated by `configs/schema/run.schema.json` (embedded into the
+  engine at build time as `rls::kConfigSchema`). Presets: `1v1-basics`, `1v1-accurate`, `3v3-team`, `smoke`.
+- Rewards are computed by one inline function `engine/src/env/Reward.h` reading weights from the config JSON.
+
+Current code map (small, ~5k lines total):
+  engine/src/sim/RocketSimBackend.*  arena ownership + GameState snapshot
+  engine/src/sim/GameState.h         snapshot structs, Perspective (orange mirror), field constants
+  engine/src/env/ObsBuilder.*        basic + advanced_v1 observations
+  engine/src/env/ActionParser.*      90-action table
+  engine/src/env/Reward.h            reward function
+  engine/src/ppo/Gae.h               GAE
+  engine/src/learner/Config.*        schema validation, defaults
+  engine/src/learner/Trainer.*       Train / Play / Bench, PPO update, checkpoints, events
+  engine/src/cli/Main.cpp            CLI + stdin control inbox
+  app/src/App.svelte                 the entire UI (931 lines, single component)
+  app/src/lib/{Chart,MatchView,Document}.svelte
+  app/src-tauri/src/{engine,error,lib}.rs
+
+KNOWN GAPS vs the approved plan (candidates for the next phase):
+- No skill tracker / ELO vs frozen past versions, no historical opponent pool (self-play is same-policy only).
+- No RLViser streaming (schemas vendored, flatc codegen wired, but no sender).
+- Reward system is monolithic: no per-term live contribution breakdown, no ZeroSum/team-spirit wrapper,
+  no Bump/Demo/StrongTouch terms, no weight schedules/curriculum. No `1v1-scoring` / `2v2-team` presets.
+- `Reward.h` does JSON hash lookups per agent per step (hot path).
+- App is a single 931-line component; plan called for a design-token system with 4 themes and a routed shell.
+- Assistant is OpenAI-compatible only; plan called for provider presets (incl. Anthropic Messages) and a
+  model catalog fetched from /v1/models.
+- Throughput target was >=50k steps/s at 512 arenas; only 32-arena numbers measured so far.
+See `docs/internal/RESUME.md`, `docs/how-it-works.md`, `docs/internal/ACCEPTANCE.md`.
