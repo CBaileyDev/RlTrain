@@ -237,3 +237,40 @@ rather than calling `cmake` directly, or the configure step will not find a comp
 Verified working: VS 2026 Community, MSVC 19.51.36256.0, `cl.exe` at
 `C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\HostX64\x64\cl.exe`.
 CMake 4.4.3 accepts RocketSim's `cmake_minimum_required(VERSION 3.8)` without error.
+
+## CUDA + MSVC toolset incompatibility — SOLVED, do not regress this
+
+Three separate failures were hit and fixed while getting `find_package(Torch)` to configure.
+`tools/build.ps1` now handles all three automatically. Do not "simplify" it away.
+
+1. **CUDA Toolkit must be installed** even though libtorch ships its own CUDA runtime DLLs,
+   because `TorchConfig.cmake` -> `Caffe2Config.cmake` -> `find_package(CUDA)` runs at configure time.
+   Installed: CUDA 13.0 at `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0`, nvcc V13.0.88.
+
+2. **Paths must use forward slashes.** Passing
+   `-DCUDA_TOOLKIT_ROOT_DIR="C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0"` fails inside
+   libtorch's vendored `Modules_CUDA_fix/upstream/FindCUDA.cmake` with
+   `Syntax error ... Invalid character escape '\P'`. Use `C:/Program Files/...`.
+
+3. **The newest MSVC is too new for nvcc.** With VS 2026's toolset 14.51, CUDA 13.0's
+   `crt/host_config.h` errors: "unsupported Microsoft Visual Studio version! Only the versions
+   between 2019 and 2022 (inclusive) are supported". Forcing it with `-allow-unsupported-compiler`
+   gets further and then dies harder: `nvcc error : 'cudafe++' died with status 0xC0000005
+   (ACCESS_VIOLATION)`. **Do not use -allow-unsupported-compiler.**
+   The fix is to select a 14.4x toolset via `vcvars64.bat -vcvars_ver=14.44`.
+   This machine has toolset **14.44.35207** under BOTH VS 2026 Community and VS 2022 Build Tools,
+   so no extra install was needed.
+
+Verified-good configure command (what build.ps1 now generates):
+
+```
+vcvars64.bat -vcvars_ver=14.44
+cmake -S engine -B engine/build -G "Ninja Multi-Config" \
+      -DCMAKE_PREFIX_PATH=C:/Users/barke/Desktop/RlBot/engine/libtorch \
+      -DCUDA_TOOLKIT_ROOT_DIR="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0" \
+      -DCMAKE_CUDA_ARCHITECTURES=89
+```
+
+`CMAKE_CUDA_ARCHITECTURES=89` is Ada Lovelace, matching the RTX 4080.
+Configure succeeds and pulls Catch2 v3.7.1 and FlatBuffers automatically.
+**Always build via `pwsh -File tools/build.ps1`.** Calling `cmake` directly will fail.

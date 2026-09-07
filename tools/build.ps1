@@ -52,40 +52,106 @@ $EngineDir = Join-Path $RepoRoot 'engine'
 $BuildDir = Join-Path $EngineDir 'build'
 $TorchDir = Join-Path $EngineDir 'libtorch'
 
+# CUDA 13.0's host_config.h refuses any MSVC newer than the Visual Studio 2022 toolset,
+# and forcing it through with -allow-unsupported-compiler makes nvcc's cudafe++ crash on
+# the newer STL headers. So when we are building against CUDA libtorch we must select a
+# 14.4x toolset even on a machine whose default is newer.
+$script:MaxCudaToolset = [version]'14.50'
+
+function Get-CudaRoot {
+    <#
+        Returns the CUDA Toolkit path using FORWARD SLASHES, or $null.
+
+        Forward slashes matter: libtorch bundles its own copy of the old FindCUDA module,
+        which pastes the path into a CMake string. A Windows path like
+        "C:\Program Files\NVIDIA..." then fails to parse with "Invalid character escape '\P'".
+    #>
+    $base = 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA'
+    if (-not (Test-Path $base)) { return $null }
+    $newest = Get-ChildItem $base -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^v\d+\.\d+$' } |
+        Sort-Object { [version]($_.Name.TrimStart('v')) } -Descending |
+        Select-Object -First 1
+    if (-not $newest) { return $null }
+    return $newest.FullName.Replace('\', '/')
+}
+
 function Import-MsvcEnvironment {
     <#
         CMake's Ninja generator needs cl.exe on PATH plus a pile of INCLUDE/LIB variables.
         Visual Studio only sets those inside its developer shell, so we run vcvars64.bat
         in a throwaway cmd and copy the resulting environment into this session.
+
+        When CUDA is in play we additionally pin the toolset version, because the newest
+        installed MSVC is often too new for nvcc.
     #>
-    if (Get-Command cl -ErrorAction SilentlyContinue) {
-        Write-Host '  MSVC environment already active.' -ForegroundColor DarkGray
-        return
-    }
+    param([switch]$ForCuda)
 
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     if (-not (Test-Path $vswhere)) {
         throw 'Visual Studio is not installed. Run tools/setup.ps1 for instructions.'
     }
 
-    $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if (-not $vsPath) {
+    $installs = & $vswhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json
+    if (-not $installs) {
         throw "Visual Studio has no C++ workload installed. Add 'Desktop development with C++' in the Visual Studio Installer."
     }
 
-    $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
+    # Collect every (installation, toolset version) pair available on this machine.
+    $candidates = foreach ($inst in $installs) {
+        $toolsetDir = Join-Path $inst.installationPath 'VC\Tools\MSVC'
+        if (-not (Test-Path $toolsetDir)) { continue }
+        foreach ($t in Get-ChildItem $toolsetDir -Directory -ErrorAction SilentlyContinue) {
+            $parsed = $null
+            if (-not [version]::TryParse($t.Name, [ref]$parsed)) { continue }
+            [pscustomobject]@{
+                Install = $inst.installationPath
+                Display = $inst.displayName
+                Full    = $parsed
+                Short   = '{0}.{1}' -f $parsed.Major, ([string]$parsed.Minor).PadLeft(2, '0').Substring(0, 2)
+            }
+        }
+    }
+
+    if (-not $candidates) { throw 'No MSVC toolset found in any Visual Studio installation.' }
+
+    $chosen = $null
+    if ($ForCuda) {
+        $chosen = $candidates | Where-Object { $_.Full -lt $script:MaxCudaToolset } |
+            Sort-Object Full -Descending | Select-Object -First 1
+        if (-not $chosen) {
+            $newest = ($candidates | Sort-Object Full -Descending | Select-Object -First 1).Full
+            throw @"
+No CUDA-compatible MSVC toolset is installed.
+  Newest found: $newest
+  Needed:       anything below $script:MaxCudaToolset (the Visual Studio 2022 v143 toolset)
+
+CUDA cannot compile against a newer toolset. Two ways forward:
+  1. In the Visual Studio Installer, add "MSVC v143 - VS 2022 C++ x64/x86 build tools".
+  2. Build without CUDA:  pwsh -File tools/setup.ps1 -Cpu   (training will be much slower)
+"@
+        }
+    }
+    else {
+        $chosen = $candidates | Sort-Object Full -Descending | Select-Object -First 1
+    }
+
+    $vcvars = Join-Path $chosen.Install 'VC\Auxiliary\Build\vcvars64.bat'
     if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found at $vcvars" }
 
-    Write-Host "  Loading MSVC environment from $vsPath" -ForegroundColor DarkGray
-    cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+    Write-Host "  MSVC $($chosen.Full) from $($chosen.Display)" -ForegroundColor DarkGray
+
+    # Ask vcvars for that exact toolset so a newer default does not win.
+    $verArg = "-vcvars_ver=$($chosen.Full.Major).$($chosen.Full.Minor)"
+    cmd /c "`"$vcvars`" $verArg >nul 2>&1 && set" | ForEach-Object {
         if ($_ -match '^([^=]+)=(.*)$') {
             Set-Item -Path "env:$($matches[1])" -Value $matches[2] -ErrorAction SilentlyContinue
         }
     }
 
-    if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
-        throw 'Failed to import the MSVC environment (cl.exe still not on PATH).'
-    }
+    $cl = Get-Command cl -ErrorAction SilentlyContinue
+    if (-not $cl) { throw 'Failed to import the MSVC environment (cl.exe still not on PATH).' }
+    Write-Verbose "cl.exe: $($cl.Source)"
 }
 
 Write-Host ''
@@ -100,15 +166,47 @@ if ($Clean -and (Test-Path $BuildDir)) {
     Remove-Item $BuildDir -Recurse -Force
 }
 
-Import-MsvcEnvironment
+# Is this a CUDA libtorch? If so we need a CUDA-compatible compiler and toolkit paths.
+$isCudaTorch = Test-Path (Join-Path $TorchDir 'lib\torch_cuda.dll')
+$cudaRoot = if ($isCudaTorch) { Get-CudaRoot } else { $null }
+
+if ($isCudaTorch -and -not $cudaRoot) {
+    throw @'
+This is the CUDA build of libtorch, but no CUDA Toolkit is installed.
+
+libtorch ships its own CUDA runtime DLLs, but its CMake config still calls find_package(CUDA)
+while configuring, so the toolkit has to be present to build.
+
+  Fix:  winget install --id Nvidia.CUDA --version 13.0
+  Or:   pwsh -File tools/setup.ps1 -Cpu    (rebuild against CPU libtorch instead)
+'@
+}
+
+Import-MsvcEnvironment -ForCuda:$isCudaTorch
+
+if ($cudaRoot) {
+    Write-Host "  CUDA $cudaRoot" -ForegroundColor DarkGray
+    $env:PATH = "$cudaRoot/bin;$env:PATH"
+    $env:CUDA_PATH = $cudaRoot
+}
 
 $generator = if (Get-Command ninja -ErrorAction SilentlyContinue) { 'Ninja Multi-Config' } else { $null }
 
 $needConfigure = $Reconfigure -or -not (Test-Path (Join-Path $BuildDir 'CMakeCache.txt'))
 if ($needConfigure) {
     Write-Host '  Configuring...' -ForegroundColor DarkGray
-    $cfgArgs = @('-S', $EngineDir, '-B', $BuildDir, "-DCMAKE_PREFIX_PATH=$TorchDir")
+    # Forward slashes throughout: libtorch's vendored FindCUDA module chokes on backslashes.
+    $cfgArgs = @(
+        '-S', $EngineDir.Replace('\', '/'),
+        '-B', $BuildDir.Replace('\', '/'),
+        "-DCMAKE_PREFIX_PATH=$($TorchDir.Replace('\','/'))"
+    )
     if ($generator) { $cfgArgs += @('-G', $generator) }
+    if ($cudaRoot) {
+        $cfgArgs += "-DCUDA_TOOLKIT_ROOT_DIR=$cudaRoot"
+        # 89 = Ada Lovelace (RTX 40 series). Widen this if you target other GPUs.
+        $cfgArgs += '-DCMAKE_CUDA_ARCHITECTURES=89'
+    }
     & cmake @cfgArgs
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed (exit $LASTEXITCODE)." }
 }
