@@ -1,0 +1,21 @@
+{
+  // Build tooling runs in Node, not in WebView2. Keeping it in its own project is what
+  // lets the app's tsconfig omit `node` from `types` — so a stray `import fs from "node:fs"`
+  // in a Svelte component is a type error rather than a runtime crash in the shipped app.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["vite.config.ts"]
+}

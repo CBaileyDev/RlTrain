@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    // Vite compiles each file in isolation, so anything that needs whole-program
+    // knowledge (const enums, value/type ambiguity in re-exports) must be banned here
+    // or the dev build and the production build can silently disagree.
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+
+    // The Svelte compiler emits the JS; tsc and svelte-check only ever type-check.
+    "noEmit": true,
+    "allowJs": false,
+    "checkJs": false,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "useDefineForClassFields": true,
+
+    // Runes-mode components are still `.svelte` modules to TypeScript; this keeps
+    // `import App from "./App.svelte"` resolvable without a shim declaration.
+    "types": ["svelte", "vite/client"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.svelte"],
+  // vite.config.ts is deliberately absent: it is Node code, not app code, and is
+  // type-checked separately by tsconfig.node.json (see the `check` script). A
+  // `references` entry would be the idiomatic link, but that requires `composite: true`
+  // and emitted declarations on a project that only ever type-checks.
+  "exclude": ["node_modules", "dist", "src-tauri"]
+}

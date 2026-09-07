@@ -1,0 +1,112 @@
+/*
+ * app.css — reset only.
+ *
+ * The design system (theme tokens, typography scale, component primitives) lands in a
+ * later phase. Everything here is deliberately unopinionated: it removes browser
+ * defaults that would fight a hand-written design system, and nothing else.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+html {
+  /* WebView2 respects this for form controls and scrollbars; declaring it up front
+     avoids a flash of light-mode native widgets before any CSS variables apply. */
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family:
+    "Inter", -apple-system, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #e6e9f0;
+  background: #0b0e14;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* A frameless window has no OS chrome to drag, so text selection is a constant
+   nuisance while dragging the custom title bar. Opt content back in explicitly. */
+body {
+  user-select: none;
+  cursor: default;
+}
+
+input,
+textarea,
+[contenteditable],
+[data-selectable] {
+  user-select: text;
+}
+
+/* The whole app is a fixed-size desktop shell; the document itself must never scroll,
+   only the panes inside it. */
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+img,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul[role="list"],
+ol[role="list"] {
+  list-style: none;
+}
+
+:focus-visible {
+  outline: 2px solid #5b8cff;
+  outline-offset: 2px;
+}
+
+/* Respect the OS "reduce motion" setting globally rather than per-animation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

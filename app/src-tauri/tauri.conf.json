@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "RL Studio",
+  "identifier": "dev.rlstudio.app",
+  "version": "../package.json",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "RL Studio",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true,
+        "center": true,
+        "decorations": false,
+        "transparent": false,
+        "visible": false,
+        "backgroundColor": "#0B0E14",
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:* ws://localhost:*; worker-src 'self' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "RL Studio",
+    "category": "DeveloperTool",
+    "shortDescription": "Learn reinforcement learning by training Rocket League bots.",
+    "longDescription": "RL Studio trains a neural network to play Rocket League inside a headless physics simulation and shows you what it is learning: live training curves, a 3D view of the bot playing itself, a reward editor you can adjust mid-run, and an assistant that reads your metrics.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    }
+  }
+}
