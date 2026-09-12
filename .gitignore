@@ -14,7 +14,6 @@ engine/src/generated/
 engine/schemas/generated/
 
 # Assets that are NOT redistributable (dumped from the user Rocket League install)
-engine/assets/collision_meshes/
 collision-meshes/
 engine/assets/rlviser/
 engine/assets/practice_meshes/

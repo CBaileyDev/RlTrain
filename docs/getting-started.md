@@ -45,9 +45,8 @@ libtorch, the CUDA 13.0 toolkit from NVIDIA's Fedora repository. If CMake reject
 GCC as too new for that toolkit, either install an older GCC and point CMake at it with
 `-DCMAKE_CXX_COMPILER`, or build CPU-only. There is no Linux installer or portable folder
 yet: run from the source checkout with `./start.sh`, which sets `RL_STUDIO_HOME` to the
-checkout so the app finds `engine/build/bin/rl-engine`. Collision meshes still have to be
-dumped on a machine that has Rocket League installed, then copied into
-`engine/assets/collision_meshes`.
+checkout so the app finds `engine/build/bin/rl-engine`. The soccar collision meshes are
+checked in under `engine/assets/collision_meshes`, so a clone is ready for the Accurate Arena.
 
 ## Choose Practice Arena
 
