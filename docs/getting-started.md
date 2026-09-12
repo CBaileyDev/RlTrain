@@ -26,6 +26,29 @@ The CUDA build of libtorch needs a matching toolkit at configure time. For a CPU
 build, use the setup script's `-Cpu` option. The [troubleshooting guide](troubleshooting.md)
 explains build errors and runtime checks.
 
+## Build on Linux (Fedora)
+
+The engine and the desktop app both build on Linux. The Linux scripts mirror the
+PowerShell ones and are untested outside Fedora KDE; report anything that breaks.
+
+```bash
+sudo dnf install gcc-c++ cmake ninja-build git curl unzip nodejs npm     webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel libxdo-devel openssl-devel
+curl https://sh.rustup.rs -sSf | sh        # Rust, if you do not have it
+bash tools/setup.sh                        # or: bash tools/setup.sh --cpu
+bash tools/build.sh --test
+bash tools/build-app.sh
+./start.sh
+```
+
+GPU training needs the NVIDIA driver (580 or newer) and, to configure the CUDA build of
+libtorch, the CUDA 13.0 toolkit from NVIDIA's Fedora repository. If CMake rejects your
+GCC as too new for that toolkit, either install an older GCC and point CMake at it with
+`-DCMAKE_CXX_COMPILER`, or build CPU-only. There is no Linux installer or portable folder
+yet: run from the source checkout with `./start.sh`, which sets `RL_STUDIO_HOME` to the
+checkout so the app finds `engine/build/bin/rl-engine`. Collision meshes still have to be
+dumped on a machine that has Rocket League installed, then copied into
+`engine/assets/collision_meshes`.
+
 ## Choose Practice Arena
 
 The onboarding dialog lets you choose Practice or Accurate Arena. Start with Practice:

@@ -34,11 +34,23 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 
 # The assistant's API key belongs in the OS credential vault, never in the settings file.
-keyring = { version = "3", features = ["windows-native"] }
+# keyring 3 ships with NO backend unless a platform feature is enabled, so each OS
+# selects its own below (a missing feature silently stores nothing).
+keyring = { version = "3", default-features = false }
 
 # rustls rather than native-tls: it removes the OpenSSL build dependency entirely, which
 # matters because this project already has a heavy C++ toolchain to keep working.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Secret Service (KWallet on KDE, GNOME Keyring elsewhere) via D-Bus, with rustls so no OpenSSL is needed.
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
 
 [profile.release]
 # A portfolio desktop app benefits far more from a small, fast binary than from fast

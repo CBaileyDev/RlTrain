@@ -207,6 +207,12 @@ if(RLS_CLI_SOURCES)
             COMMAND_EXPAND_LISTS
             COMMENT "Copying libtorch DLLs next to rl-engine.exe"
         )
+    else()
+        # On Linux/macOS the shared libraries stay in libtorch/lib; bake that directory
+        # (plus the binary's own directory, for a packaged copy) into the run-time search path.
+        set_target_properties(rl-engine PROPERTIES
+            BUILD_RPATH "$ORIGIN;${TORCH_INSTALL_PREFIX}/lib"
+            INSTALL_RPATH "$ORIGIN;${TORCH_INSTALL_PREFIX}/lib")
     endif()
 endif()
 
@@ -214,7 +220,8 @@ endif()
 # Tests
 # -----------------------------------------------------------------------------
 if(RLS_BUILD_TESTS)
-    file(GLOB_RECURSE RLS_TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp")
+    # Top level only: tests/accurate has its own executable (see below).
+    file(GLOB RLS_TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp")
     if(RLS_TEST_SOURCES)
         enable_testing()
         add_executable(rlstudio_tests ${RLS_TEST_SOURCES})
@@ -226,11 +233,38 @@ if(RLS_BUILD_TESTS)
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TORCH_DLLS} $<TARGET_FILE_DIR:rlstudio_tests>
                 COMMAND_EXPAND_LISTS
             )
+        else()
+            set_target_properties(rlstudio_tests PROPERTIES BUILD_RPATH "$ORIGIN;${TORCH_INSTALL_PREFIX}/lib")
         endif()
 
         list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
         include(Catch)
         catch_discover_tests(rlstudio_tests)
+    endif()
+
+    # Real-arena physics checks (wall and ceiling driving). RocketSim::Init is process-wide,
+    # so these need their own executable, and they only build when the dumped soccar meshes
+    # exist because those cannot be redistributed. Override the path with RLS_MESH_PATH.
+    set(RLS_ACCURATE_MESHES "${CMAKE_CURRENT_SOURCE_DIR}/assets/collision_meshes")
+    if(EXISTS "${RLS_ACCURATE_MESHES}/soccar")
+        file(GLOB RLS_ACCURATE_TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/accurate/*.cpp")
+        add_executable(rlstudio_accurate_tests ${RLS_ACCURATE_TEST_SOURCES})
+        target_link_libraries(rlstudio_accurate_tests PRIVATE rlstudio_core Catch2::Catch2WithMain)
+        target_compile_definitions(rlstudio_accurate_tests PRIVATE RLS_ACCURATE_MESH_PATH="${RLS_ACCURATE_MESHES}")
+        if(MSVC)
+            target_compile_options(rlstudio_accurate_tests PRIVATE /W4 /permissive- /Zc:__cplusplus /MP /bigobj)
+            file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
+            add_custom_command(TARGET rlstudio_accurate_tests POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TORCH_DLLS} $<TARGET_FILE_DIR:rlstudio_accurate_tests>
+                COMMAND_EXPAND_LISTS
+            )
+        else()
+            set_target_properties(rlstudio_accurate_tests PROPERTIES BUILD_RPATH "$ORIGIN;${TORCH_INSTALL_PREFIX}/lib")
+        endif()
+        catch_discover_tests(rlstudio_accurate_tests)
+        message(STATUS "  Accurate-arena tests: enabled (${RLS_ACCURATE_MESHES})")
+    else()
+        message(STATUS "  Accurate-arena tests: skipped, no meshes at ${RLS_ACCURATE_MESHES}/soccar")
     endif()
 endif()
 

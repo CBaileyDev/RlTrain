@@ -1,0 +1,4 @@
+# Shell scripts must stay LF even when the repo is copied from a Windows checkout.
+*.sh text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

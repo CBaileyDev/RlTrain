@@ -24,6 +24,9 @@ For a fresh machine, `tools/setup.ps1` fetches the engine dependencies, and
 `tools/check-env.ps1` diagnoses the toolchain. Building the desktop shell also requires
 Rust and Node.js. See [Getting started](docs/getting-started.md).
 
+On Linux, use the Bash equivalents: `tools/setup.sh`, `tools/build.sh`, `tools/build-app.sh`
+and `./start.sh`. The getting-started guide has the Fedora package list.
+
 ## What works
 
 - C++20 RocketSim environments, 1v1 through 4v4, OpenMP arena stepping.

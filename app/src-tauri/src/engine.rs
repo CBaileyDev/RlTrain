@@ -22,13 +22,19 @@ pub struct EngineState {
     pub closing: AtomicBool,
     pub sender: Mutex<Option<mpsc::Sender<Value>>>,
 }
+/// Relative path of the engine binary. Windows adds the .exe suffix; Linux and macOS do not.
+#[cfg(windows)]
+const ENGINE_BINARY: &str = "engine/build/bin/rl-engine.exe";
+#[cfg(not(windows))]
+const ENGINE_BINARY: &str = "engine/build/bin/rl-engine";
+
 fn root() -> PathBuf {
     if let Some(path) = std::env::var_os("RL_STUDIO_HOME") {
         return PathBuf::from(path);
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            if parent.join("engine/build/bin/rl-engine.exe").exists() {
+            if parent.join(ENGINE_BINARY).exists() {
                 return parent.to_owned();
             }
         }
@@ -39,7 +45,7 @@ fn root() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
 }
 fn engine() -> PathBuf {
-    root().join("engine/build/bin/rl-engine.exe")
+    root().join(ENGINE_BINARY)
 }
 fn load(path: &Path) -> AppResult<Value> {
     Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
