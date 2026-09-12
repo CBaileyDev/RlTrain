@@ -40,7 +40,7 @@ small. The app uses a bounded 32-command queue.
   and sessionSteps. Run metadata.json persists resume origin and initial counters;
   summary.json persists final counters.
 - evaluation: completed matches, blueWins, orangeWins, draws.
-- benchmark: physicsTicksPerSecond and agentStepsPerSecond for one arena.
+- benchmark: physicsTicksPerSecond, agentStepsPerSecond, arenas, and threads for the configured arena pool.
 - error: human-readable message. Fatal command failures also exit nonzero.
 
 The supervisor adds exit with the process exit code. Errors use nonzero exit codes;

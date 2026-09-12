@@ -54,3 +54,42 @@ TEST_CASE("Goal reward is signed by team and paid once per transition", "[reward
     state.goalScoredTeam = -1;
     CHECK(rls::Reward(state, 0, config) == 0);
 }
+TEST_CASE("Cached reward weights match JSON lookups", "[rewards]") {
+    auto config = rls::DefaultConfig();
+    rls::GameState state;
+    state.carCount = 1;
+    state.deltaTime = 1.f / 15.f;
+    state.cars[0].vel = {0, 1000, 0};
+    state.cars[0].pos = {0, 0, 17};
+    state.ball.pos = {0, 1000, 93};
+    state.cars[0].flags = rls::CarFlag::kTouchedBall;
+    const auto weights = rls::RewardWeights::From(config);
+    CHECK(rls::Reward(state, 0, weights) == rls::Reward(state, 0, config));
+    config["touch"] = 9;
+    CHECK(rls::Reward(state, 0, rls::RewardWeights::From(config)) == rls::Reward(state, 0, config));
+    CHECK(rls::Reward(state, 0, weights) != rls::Reward(state, 0, config));
+}
+TEST_CASE("Masked observation encode leaves continuing arena rows unchanged", "[environment]") {
+    auto builder = rls::MakeObsBuilder("basic_v1");
+    rls::EnvSpec spec;
+    spec.teamSize = 1;
+    const int cars = spec.CarsPerArena(), width = builder->ObsSize(spec), arenas = 2;
+    std::vector<float> buffer(static_cast<size_t>(arenas * cars * width), 12345.f);
+    rls::GameState first, second;
+    first.carCount = second.carCount = static_cast<rls::u8>(cars);
+    first.ball.pos = {100, 0, 100};
+    second.ball.pos = {200, 0, 100};
+    builder->BuildBatch(first, first, {}, spec, {buffer.data(), width, cars});
+    builder->BuildBatch(second, second, {}, spec, {buffer.data() + cars * width, width, cars});
+    const auto before = buffer;
+    first.ball.pos = {999, 999, 999};
+    second.ball.pos = {300, 0, 100};
+    const uint8_t reset[] = {0, 1};
+    for (int arena = 0; arena < arenas; ++arena) {
+        if (!reset[arena]) continue;
+        auto& state = arena == 0 ? first : second;
+        builder->BuildBatch(state, state, {}, spec, {buffer.data() + arena * cars * width, width, cars});
+    }
+    for (int i = 0; i < cars * width; ++i) CHECK(buffer[static_cast<size_t>(i)] == before[static_cast<size_t>(i)]);
+    CHECK(buffer[static_cast<size_t>(cars * width)] != before[static_cast<size_t>(cars * width)]);
+}

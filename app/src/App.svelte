@@ -545,7 +545,7 @@
             evaluation = `${data.matches} matches · Blue ${data.blueWins} wins · Orange ${data.orangeWins} wins · ${data.draws} draws`;
             break;
           case 'benchmark':
-            benchmark = `${number(Number(data.physicsTicksPerSecond))} physics ticks/s · ${number(Number(data.agentStepsPerSecond))} agent steps/s (one arena)`;
+            benchmark = `${number(Number(data.physicsTicksPerSecond))} physics ticks/s · ${number(Number(data.agentStepsPerSecond))} agent steps/s (${number(Number(data.arenas) || 1)} arenas)`;
             break;
           case 'exit':
             status =

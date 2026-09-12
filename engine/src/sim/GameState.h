@@ -723,8 +723,8 @@ static_assert(std::is_trivially_copyable_v<GameState>,
 //
 // Two per arena (current + previous) is about 3.1 KB. At 512 arenas that is
 // ~1.6 MB of snapshot state, which fits in L3 comfortably -- and is under 1% of
-// the ~196 MB that 512 RocketSim arenas occupy at ArenaMemWeightMode::LIGHT
-// (383 KB each). The honest framing: the PHYSICS working set does not fit in
+// the ~650 MB that 512 RocketSim arenas occupy at ArenaMemWeightMode::HEAVY
+// (~1263 KB each). The honest framing: the PHYSICS working set does not fit in
 // cache, and our snapshot layer is a rounding error on the memory traffic.
 // Making it smaller is not where throughput comes from.
 //

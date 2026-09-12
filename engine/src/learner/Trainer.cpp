@@ -8,6 +8,7 @@
 #include <fstream>
 #include <limits>
 #include <thread>
+#include <utility>
 
 namespace rls {
 namespace {
@@ -154,14 +155,30 @@ void Train(Json config, const std::filesystem::path& run, const std::filesystem:
     std::ofstream metricsFile(run / "metrics.jsonl");
     std::vector<std::unique_ptr<RocketSimBackend>> arenas;
     for (int i = 0; i < count; ++i) arenas.push_back(std::make_unique<RocketSimBackend>(spec, SplitMix64(config["seed"].get<u64>() + i)));
-    auto current = torch::empty({agents, width}, torch::kFloat32);
-    auto encode = [&] {
-        float* data = current.data_ptr<float>();
+    const bool pin = device.is_cuda();
+    auto hostFloat = torch::TensorOptions().dtype(torch::kFloat32).pinned_memory(pin);
+    auto hostLong = torch::TensorOptions().dtype(torch::kInt64).pinned_memory(pin);
+    auto current = torch::empty({agents, width}, hostFloat);
+    auto next = torch::empty({agents, width}, hostFloat);
+    auto gpuObs = torch::empty({agents, width}, torch::TensorOptions().dtype(torch::kFloat32).device(device));
+    auto observations = torch::empty({horizon, agents, width}, hostFloat);
+    auto actions = torch::empty({horizon, agents}, hostLong);
+    auto logprobs = torch::empty({horizon, agents}, hostFloat);
+    auto values = torch::empty({horizon, agents}, hostFloat);
+    auto rewards = torch::empty({horizon, agents}, hostFloat);
+    auto nextValues = torch::empty({horizon, agents}, hostFloat);
+    auto continues = torch::empty({horizon, agents}, hostFloat);
+    auto advantages = torch::empty({horizon, agents}, hostFloat);
+    std::vector<uint8_t> reset(count), terminal(count);
+    auto encode = [&](torch::Tensor& dest, const uint8_t* mask = nullptr) {
+        float* data = dest.data_ptr<float>();
         #pragma omp parallel for schedule(static)
-        for (int a = 0; a < count; ++a)
+        for (int a = 0; a < count; ++a) {
+            if (mask && !mask[a]) continue;
             obs->BuildBatch(arenas[a]->State(), arenas[a]->State(), arenas[a]->Pads(), spec, {data + a * cars * width, width, cars});
+        }
     };
-    encode();
+    encode(current);
     Json started = progress;
     started.update({{"type", "started"}, {"run", run.string()}, {"device", device.str()},
         {"config", config}, {"obsSize", width}, {"iteration", iteration}, {"steps", steps}});
@@ -169,21 +186,19 @@ void Train(Json config, const std::filesystem::path& run, const std::filesystem:
     const auto start = Clock::now();
     auto lastFrame = start;
     bool running = true;
+    const float episodeSeconds = config["episodeSeconds"].get<float>();
+    const float noTouchSeconds = config["noTouchSeconds"].get<float>();
     while (iteration < finalIteration && running) {
         const auto iterationStart = Clock::now();
-        auto observations = torch::empty({horizon, agents, width});
-        auto actions = torch::empty({horizon, agents}, torch::kInt64);
-        auto logprobs = torch::empty({horizon, agents});
-        auto values = torch::empty({horizon, agents});
-        auto rewards = torch::empty({horizon, agents});
-        auto nextValues = torch::empty({horizon, agents});
-        auto continues = torch::ones({horizon, agents});
+        continues.fill_(1);
         int touches = 0, goals = 0, episodes = 0, completed = 0;
         for (int t = 0; t < horizon; ++t) {
             if (!Commands(config, emit, control)) { running = false; break; }
-            torch::NoGradGuard noGrad;
+            const auto weights = RewardWeights::From(config);
+            torch::InferenceMode inference;
             observations[t].copy_(current);
-            auto [logits, value] = network->Forward(current.to(device));
+            gpuObs.copy_(current, pin);
+            auto [logits, value] = network->Forward(gpuObs);
             auto logp = torch::log_softmax(logits, -1);
             auto chosen = torch::multinomial(logp.exp(), 1).squeeze(-1);
             actions[t].copy_(chosen.cpu()); values[t].copy_(value.cpu());
@@ -191,25 +206,27 @@ void Train(Json config, const std::filesystem::path& run, const std::filesystem:
             const int64_t* actionData = actions[t].data_ptr<int64_t>();
             float* rewardData = rewards[t].data_ptr<float>();
             float* continueData = continues[t].data_ptr<float>();
-            std::vector<uint8_t> reset(count), terminal(count);
             #pragma omp parallel for schedule(static) reduction(+:touches,goals,episodes)
             for (int a = 0; a < count; ++a) {
                 arenas[a]->Step({actionData + a * cars, static_cast<size_t>(cars)});
                 const auto& state = arenas[a]->State();
                 terminal[a] = state.GoalScored();
                 const float sinceTouch = state.ball.lastTouchCarId ? state.TimeSinceTouch() : state.episodeTime;
-                reset[a] = terminal[a] || state.episodeTime >= config["episodeSeconds"].get<float>() || sinceTouch >= config["noTouchSeconds"].get<float>();
+                reset[a] = terminal[a] || state.episodeTime >= episodeSeconds || sinceTouch >= noTouchSeconds;
                 goals += terminal[a]; episodes += reset[a];
                 for (int c = 0; c < cars; ++c) {
-                    rewardData[a * cars + c] = Reward(state, c, config);
+                    rewardData[a * cars + c] = Reward(state, c, weights);
                     continueData[a * cars + c] = reset[a] ? 0.f : 1.f;
                     touches += bool(state.cars[c].flags & CarFlag::kTouchedBall);
                 }
             }
             // Bootstrap the actual transition endpoint BEFORE reset. Time limits
             // bootstrap value, goals do not. Both cut the recursive GAE trace.
-            encode();
-            nextValues[t].copy_(network->Forward(current.to(device)).second.cpu());
+            // Continuing arenas keep this encoding after reset; only finished
+            // arenas are rewritten, so we do not rebuild every row twice.
+            encode(next);
+            gpuObs.copy_(next, pin);
+            nextValues[t].copy_(network->Forward(gpuObs).second.cpu());
             float* nextData = nextValues[t].data_ptr<float>();
             for (int a = 0; a < count; ++a) {
                 if (terminal[a]) for (int c = 0; c < cars; ++c) nextData[a * cars + c] = 0;
@@ -218,22 +235,22 @@ void Train(Json config, const std::filesystem::path& run, const std::filesystem:
                 emit(Frame(arenas[0]->State())); lastFrame = Clock::now();
             }
             for (int a = 0; a < count; ++a) if (reset[a]) arenas[a]->Reset();
-            encode();
+            encode(next, reset.data());
+            std::swap(current, next);
             ++completed;
         }
         if (completed != horizon) break; // Never optimize a partially filled buffer.
-        auto advantages = torch::zeros_like(rewards);
         const float gamma = config["gamma"], lambda = config["gaeLambda"];
         const auto size = static_cast<size_t>(batch);
         ComputeGae({rewards.data_ptr<float>(), size}, {values.data_ptr<float>(), size},
             {nextValues.data_ptr<float>(), size}, {continues.data_ptr<float>(), size},
             horizon, agents, gamma, lambda, {advantages.data_ptr<float>(), size});
-        auto returns = (advantages + values).reshape({batch}).to(device);
-        auto adv = advantages.reshape({batch}).to(device);
+        auto returns = (advantages + values).reshape({batch}).to(device, pin);
+        auto adv = advantages.reshape({batch}).to(device, pin);
         adv = (adv - adv.mean()) / (adv.std(false) + 1e-8);
-        auto x = observations.reshape({batch, width}).to(device);
-        auto act = actions.reshape({batch}).to(device);
-        auto oldLogp = logprobs.reshape({batch}).to(device);
+        auto x = observations.reshape({batch, width}).to(device, pin);
+        auto act = actions.reshape({batch}).to(device, pin);
+        auto oldLogp = logprobs.reshape({batch}).to(device, pin);
         double policyLoss = 0, valueLoss = 0, entropy = 0, kl = 0, clipped = 0;
         int updates = 0;
         const int minibatch = config["minibatchSize"], epochs = config["epochs"];
@@ -336,11 +353,25 @@ void Bench(Json config, const Emit& emit) {
     config = ValidateConfig(config);
     RocketSimBackend::Initialize(Meshes(config), config["arena"] == "practice");
     const auto spec = SpecFromConfig(config);
-    RocketSimBackend arena(spec, 42);
-    std::vector<int64_t> actions(spec.CarsPerArena(), 0);
+    const int count = config["arenas"].get<int>(), cars = spec.CarsPerArena(), steps = 2048;
+    omp_set_num_threads(config["threads"].get<int>());
+    std::vector<std::unique_ptr<RocketSimBackend>> arenas;
+    arenas.reserve(count);
+    for (int i = 0; i < count; ++i)
+        arenas.push_back(std::make_unique<RocketSimBackend>(spec, SplitMix64(42ull + static_cast<u64>(i))));
     const auto start = Clock::now();
-    for (int i = 0; i < 10000; ++i) { arena.Step(actions); if (arena.State().GoalScored()) arena.Reset(); }
+    #pragma omp parallel for schedule(static)
+    for (int a = 0; a < count; ++a) {
+        std::vector<int64_t> actions(cars, 0);
+        for (int i = 0; i < steps; ++i) {
+            arenas[a]->Step(actions);
+            if (arenas[a]->State().GoalScored()) arenas[a]->Reset();
+        }
+    }
     const double seconds = std::chrono::duration<double>(Clock::now() - start).count();
-    emit({{"type", "benchmark"}, {"physicsTicksPerSecond", 10000 * spec.tickSkip / seconds}, {"agentStepsPerSecond", 10000 * spec.CarsPerArena() / seconds}});
+    const double envSteps = static_cast<double>(steps) * count;
+    emit({{"type", "benchmark"}, {"physicsTicksPerSecond", envSteps * spec.tickSkip / seconds},
+        {"agentStepsPerSecond", envSteps * cars / seconds}, {"arenas", count},
+        {"threads", config["threads"].get<int>()}});
 }
 }

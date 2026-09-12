@@ -79,7 +79,11 @@ void RocketSimBackend::Initialize(const std::filesystem::path& meshes, bool prac
 RocketSimBackend::RocketSimBackend(EnvSpec spec, u64 seed) : impl(std::make_unique<Impl>()) {
     impl->spec = spec; impl->rng.Reseed(seed);
     RocketSim::ArenaConfig config;
-    config.memWeightMode = RocketSim::ArenaMemWeightMode::LIGHT;
+    // HEAVY is RocketSim's default: larger Bullet pools and a tighter broadphase
+    // grid, slightly faster ticks at ~1.3 MB/arena. LIGHT was for memory-bound
+    // hosts; this workbench already caps host rollouts at 2 GiB and typical
+    // arena counts fit in a few hundred MB either way.
+    config.memWeightMode = RocketSim::ArenaMemWeightMode::HEAVY;
     impl->arena.reset(RocketSim::Arena::Create(RocketSim::GameMode::SOCCAR, config));
     for (int i = 0; i < spec.CarsPerArena(); ++i)
         impl->cars.push_back(impl->arena->AddCar(i < spec.teamSize ? RocketSim::Team::BLUE : RocketSim::Team::ORANGE));

@@ -106,7 +106,7 @@ Detect a touch by comparing `ballHitInfo.tickCountWhenHit` against the arena tic
 Macros: `RS_OPPOSITE_TEAM(team)`, `RS_TEAM_FROM_Y(y)`.
 
 `ArenaConfig`: `memWeightMode` (`HEAVY` about 1263KB per arena with 4 cars, `LIGHT` about 383KB).
-**Use LIGHT** for large arena pools. Also `minPos/maxPos/maxAABBLen/noBallRot/useCustomBroadphase/maxObjects/useCustomBoostPads/customBoostPads`.
+**Use HEAVY** (RocketSim's default). It is slightly faster per tick; 512 arenas is still ~650 MB. LIGHT only if host RAM is actually tight. Also `minPos/maxPos/maxAABBLen/noBallRot/useCustomBroadphase/maxObjects/useCustomBoostPads/customBoostPads`.
 
 ### RLConst values (namespace `RocketSim::RLConst`) — VERIFIED
 

@@ -43,7 +43,7 @@ width and action timing for training resume.
 Stop the run and reduce arenas, rolloutSteps, hiddenSize or minibatchSize. The rollout
 is initially stored in host RAM and copied to the selected device for updates. Increase
 CPU worker count only while throughput improves. Metrics include both simulation and
-optimizer work, whereas the physics benchmark only measures one arena's simulation.
+optimizer work, whereas the physics benchmark measures the configured arena pool under OpenMP.
 
 ## Wrong collisions or missing meshes
 
